@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TwoG.GpsClient.Core/TwoG.GpsClient.Core.csproj" />
+    <Project Path="src/TwoG.GpsClient/TwoG.GpsClient.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj" />
+  </Folder>
+</Solution>
