@@ -27,16 +27,25 @@ public partial class App : Application
             return;
         }
 
+        var startMinimizedArg = e.Args.Any(a =>
+            string.Equals(a, "-minimized", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+
         _singleInstanceMutex = new Mutex(true, MutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
-            // Já existe uma instância: pede que ela se mostre e encerra esta.
-            try
+            // Já existe uma instância. Se o relançamento foi deliberado (usuário),
+            // pede que ela se mostre; se veio do autostart do MSFS (-minimized),
+            // não rouba o foco do simulador.
+            if (!startMinimizedArg)
             {
-                EventWaitHandle.OpenExisting(ShowEventName).Set();
+                try
+                {
+                    EventWaitHandle.OpenExisting(ShowEventName).Set();
+                }
+                catch (WaitHandleCannotBeOpenedException) { }
+                catch (UnauthorizedAccessException) { }
             }
-            catch (WaitHandleCannotBeOpenedException) { }
-            catch (UnauthorizedAccessException) { }
             Shutdown();
             return;
         }
@@ -53,9 +62,7 @@ public partial class App : Application
         var window = new MainWindow { DataContext = viewModel };
         MainWindow = window;
 
-        var startMinimized = settings.StartMinimized
-            || e.Args.Any(a => string.Equals(a, "-minimized", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+        var startMinimized = settings.StartMinimized || startMinimizedArg;
         if (!startMinimized)
             window.Show();
 

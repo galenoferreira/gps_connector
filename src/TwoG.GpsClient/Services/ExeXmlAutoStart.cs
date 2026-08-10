@@ -22,6 +22,15 @@ public sealed class ExeXmlAutoStart
     public const string AddonName = "2G GPS Cliente";
     private const string LaunchCommandLine = "-minimized";
 
+    static ExeXmlAutoStart()
+    {
+        // EXE.xml de outros add-ons frequentemente declara encoding="Windows-1252"
+        // (herança FSX/P3D). .NET moderno só conhece esse code page depois de
+        // registrar o provider — sem isso, XDocument.Load lança XmlException e o
+        // arquivo seria tratado como "malformado".
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
     public sealed record SyncResult(string SimName, bool Success, string Detail);
 
     /// <summary>Caminho do executável a registrar (o do processo atual).</summary>
@@ -160,7 +169,12 @@ public sealed class ExeXmlAutoStart
             Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             Indent = true,
         };
-        using var writer = XmlWriter.Create(path, settings);
-        doc.Save(writer);
+
+        // Escrita atômica: um EXE.xml truncado no meio de um write impediria o
+        // MSFS de abrir. Grava num temp no mesmo volume e faz o swap por rename.
+        var tmp = path + ".2g-tmp";
+        using (var writer = XmlWriter.Create(tmp, settings))
+            doc.Save(writer);
+        File.Move(tmp, path, overwrite: true);
     }
 }

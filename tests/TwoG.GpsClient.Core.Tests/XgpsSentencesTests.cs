@@ -73,6 +73,17 @@ public class XgpsSentencesTests
     {
         Assert.Equal(expected, XgpsSentences.Normalize360(input), precision: 6);
     }
+
+    [Theory]
+    [InlineData("João Pilão", "Joao Pilao")]     // acentos decompostos, não '?'
+    [InlineData("2G GPS", "2G GPS")]
+    [InlineData("a,b", "a b")]                    // vírgula é o separador do protocolo
+    [InlineData("  éçã  ", "eca")]
+    [InlineData("日本", "")]                      // sem equivalente ASCII → vazio
+    public void SanitizeDeviceName_ProducesCleanAscii(string input, string expected)
+    {
+        Assert.Equal(expected, XgpsSentences.SanitizeDeviceName(input));
+    }
 }
 
 public class NetworkMathTests
@@ -93,5 +104,13 @@ public class NetworkMathTests
         Assert.Null(NetworkMath.DirectedBroadcast(IPAddress.Parse("192.168.1.42"), null));
         Assert.Null(NetworkMath.DirectedBroadcast(IPAddress.Parse("192.168.1.42"), IPAddress.Parse("0.0.0.0")));
         Assert.Null(NetworkMath.DirectedBroadcast(IPAddress.Parse("::1"), IPAddress.Parse("255.255.255.0")));
+    }
+
+    [Fact]
+    public void DirectedBroadcast_HostAndPointToPointMasks_ReturnNull()
+    {
+        // /32 (VPN) e /31 (ponto-a-ponto) não têm broadcast dirigido útil.
+        Assert.Null(NetworkMath.DirectedBroadcast(IPAddress.Parse("100.101.102.103"), IPAddress.Parse("255.255.255.255")));
+        Assert.Null(NetworkMath.DirectedBroadcast(IPAddress.Parse("10.0.0.1"), IPAddress.Parse("255.255.255.254")));
     }
 }

@@ -17,7 +17,9 @@ public static class NetworkMath
 
         var ip = address.GetAddressBytes();
         var m = mask.GetAddressBytes();
-        if (m is [0, 0, 0, 0])
+        // /0 é inválida; /32 e /31 não têm broadcast dirigido útil (seria o próprio
+        // IP da interface ou o par ponto-a-ponto — típico de adaptadores VPN).
+        if (m is [0, 0, 0, 0] or [255, 255, 255, 255] or [255, 255, 255, 254])
             return null;
 
         var broadcast = new byte[4];

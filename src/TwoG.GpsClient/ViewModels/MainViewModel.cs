@@ -203,18 +203,19 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var device = DeviceNameInput.Replace(",", " ").Trim();
+        var device = XgpsSentences.SanitizeDeviceName(DeviceNameInput);
         if (device.Length == 0)
         {
-            ShowFeedback("Informe um nome de dispositivo.", isError: true);
+            ShowFeedback("Informe um nome de dispositivo (ASCII).", isError: true);
             return;
         }
 
         foreach (var target in SplitTargets(UnicastInput))
         {
-            if (!System.Net.IPAddress.TryParse(target, out _))
+            if (!System.Net.IPAddress.TryParse(target, out var ip)
+                || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
             {
-                ShowFeedback($"IP inválido: {target}", isError: true);
+                ShowFeedback($"IP inválido (use IPv4): {target}", isError: true);
                 return;
             }
         }

@@ -241,7 +241,9 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
         var list = new List<IPAddress>();
         foreach (var token in raw.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (IPAddress.TryParse(token, out var ip))
+            // Só IPv4: o socket é IPv4-only (broadcast dirigido é o caminho primário).
+            if (IPAddress.TryParse(token, out var ip)
+                && ip.AddressFamily == AddressFamily.InterNetwork)
                 list.Add(ip);
         }
         return list;

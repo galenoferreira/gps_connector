@@ -219,6 +219,10 @@ public sealed class SimConnectService : ISimSource
         {
             case EVENT_ID.Sim:
                 _simRunning = data.dwData != 0;
+                // CrashReset só dispara ao fim da cut-scene de crash; quem volta ao
+                // menu e inicia novo voo nunca o recebe — solta a trava aqui também.
+                if (_simRunning)
+                    _crashed = false;
                 break;
             case EVENT_ID.PauseEx1:
                 _paused = data.dwData != 0;

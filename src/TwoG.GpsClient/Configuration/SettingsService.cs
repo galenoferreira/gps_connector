@@ -50,8 +50,8 @@ public sealed class SettingsService
 
     private static AppSettings Sanitize(AppSettings s)
     {
-        if (string.IsNullOrWhiteSpace(s.DeviceName)) s.DeviceName = "2G GPS";
-        s.DeviceName = s.DeviceName.Replace(",", " ").Trim();
+        s.DeviceName = Core.XgpsSentences.SanitizeDeviceName(s.DeviceName);
+        if (s.DeviceName.Length == 0) s.DeviceName = "2G GPS";
         if (s.Port is < 1 or > 65535) s.Port = 49002;
         if (s.XgpsHz is < 0.5 or > 10) s.XgpsHz = 5.0;
         if (s.XattHz is < 1 or > 10) s.XattHz = 5.0;

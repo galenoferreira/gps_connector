@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace TwoG.GpsClient.Core;
 
@@ -30,5 +31,24 @@ public static class XgpsSentences
     {
         var d = deg % 360.0;
         return d < 0 ? d + 360.0 : d;
+    }
+
+    /// <summary>
+    /// Sanitiza o nome do dispositivo para o fio: as sentenças são ASCII, então
+    /// acentos são decompostos ("João" → "Joao") em vez de virarem '?', vírgulas
+    /// (separador do protocolo) viram espaço e o resto não-imprimível é removido.
+    /// </summary>
+    public static string SanitizeDeviceName(string raw)
+    {
+        var decomposed = (raw ?? "").Replace(',', ' ').Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(decomposed.Length);
+        foreach (var c in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+                continue;
+            if (c is >= ' ' and <= '~')
+                sb.Append(c);
+        }
+        return sb.ToString().Trim();
     }
 }
