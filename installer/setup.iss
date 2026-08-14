@@ -38,7 +38,9 @@ WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir=..\dist
-OutputBaseFilename=2G-GPS-Cliente-Setup-{#AppVersion}
+; Nome SEM versão: é o alvo do link permanente /releases/latest/download/.
+; A versão vai no AppVersion (visível em "Adicionar ou remover programas").
+OutputBaseFilename=2G-GPS-Cliente-Setup
 SetupIconFile=..\src\TwoG.GpsClient\Assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}

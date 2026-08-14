@@ -32,11 +32,22 @@ MSFS 2020/2024 ──SimConnect──▶ 2G GPS Cliente ──UDP 49002 (XGPS/XA
 No EFB não há nada para configurar: com o tablet na mesma rede Wi-Fi do PC, o
 dispositivo "2G GPS" aparece automaticamente (no ForeFlight: **More → Devices**).
 
+## Download
+
+Estes links são **permanentes** e sempre entregam a versão mais recente — podem
+ser fixados no site sem precisar de atualização a cada release:
+
+| Link | Para quem |
+|---|---|
+| [**2G-GPS-Cliente.exe**](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente.exe) | **Recomendado** — executável único, sem instalação |
+| [2G-GPS-Cliente.zip](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente.zip) | Mesmo executável, compactado |
+| [2G-GPS-Cliente-Setup.exe](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente-Setup.exe) | Instalador com atalho no Menu Iniciar e desinstalador |
+| [Página de releases](https://github.com/galenoferreira/gps_connector/releases/latest) | Notas da versão e checksums |
+
 ## Instalação
 
-**Não há instalação.** Baixe `2G-GPS-Cliente-x.y.z.exe` na página de releases e
-execute — um único arquivo, sem pasta de dependências, sem instalador e sem
-precisar do runtime .NET.
+**Não há instalação.** Baixe o `.exe` e execute — um único arquivo, sem pasta de
+dependências, sem instalador e sem precisar do runtime .NET.
 
 - Rode de onde quiser: Desktop, Downloads, pendrive.
 - Não requer administrador nem regra de firewall (o app apenas **envia** UDP,
@@ -96,9 +107,25 @@ dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj -c Release -o publish
 
 Ambos rodam em qualquer SO (o csproj tem `EnableWindowsTargeting` e RID fixo
 `win-x64`); o publish gera o `.exe` único mesmo a partir do macOS/Linux, mas o
-binário só **executa** no Windows (SimConnect é x64/Windows). O CI
-(`.github/workflows/build.yml`) publica, **valida que a saída é 1 arquivo só**,
-compila o instalador e anexa os artefatos; tags `v*` geram release automaticamente.
+binário só **executa** no Windows (SimConnect é x64/Windows).
+
+### Publicar uma nova versão
+
+```bash
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+Só isso. O CI (`.github/workflows/build.yml`) roda os testes, publica o `.exe`
+único, **valida que a saída tem exatamente 1 arquivo**, compila o instalador,
+gera os checksums e cria o Release com as notas automáticas. A versão da tag vira
+a versão do executável (visível nas propriedades do arquivo).
+
+Os arquivos do Release **não levam a versão no nome** — é o que mantém os links
+de download permanentes funcionando. A versão fica na tag e nas propriedades do
+binário.
+
+Tags com hífen (`v1.1.0-beta.1`) entram como **pré-release** e não assumem o
+`latest`, então não afetam os links fixos do site.
 
 ### Como o .exe único funciona
 
