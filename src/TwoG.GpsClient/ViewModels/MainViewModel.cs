@@ -110,11 +110,21 @@ public partial class MainViewModel : ObservableObject
         switch (state)
         {
             case SimConnectionState.Searching:
-                SimStatusText = "Procurando simulador…";
-                SimDetail = _detectedInstalls.Length > 0
-                    ? $"Instalado: {_detectedInstalls}. Abra o simulador para conectar."
-                    : "Conecta automaticamente quando o MSFS estiver aberto.";
-                SimStatusBrush = Warn;
+                var error = _sim.LastError;
+                if (error is not null)
+                {
+                    SimStatusText = "Falha ao inicializar o SimConnect";
+                    SimDetail = error;
+                    SimStatusBrush = Err;
+                }
+                else
+                {
+                    SimStatusText = "Procurando simulador…";
+                    SimDetail = _detectedInstalls.Length > 0
+                        ? $"Instalado: {_detectedInstalls}. Abra o simulador para conectar."
+                        : "Conecta automaticamente quando o MSFS estiver aberto.";
+                    SimStatusBrush = Warn;
+                }
                 break;
             case SimConnectionState.Connected:
                 SimStatusText = "Conectado — aguardando voo";

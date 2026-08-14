@@ -34,13 +34,34 @@ dispositivo "2G GPS" aparece automaticamente (no ForeFlight: **More → Devices*
 
 ## Instalação
 
-Baixe o instalador (`2G-GPS-Cliente-Setup-x.y.z.exe`) na página de releases e execute.
+**Não há instalação.** Baixe `2G-GPS-Cliente-x.y.z.exe` na página de releases e
+execute — um único arquivo, sem pasta de dependências, sem instalador e sem
+precisar do runtime .NET.
 
-- Não requer administrador (instala por usuário, sem UAC).
-- Detecta as instalações do MSFS 2020/2024 (Store e Steam) e mostra o resultado.
-- Não precisa de regra de firewall: o app apenas **envia** UDP, liberado por padrão
-  no Windows.
-- Também há um `.zip` portátil em cada release (basta extrair e executar).
+- Rode de onde quiser: Desktop, Downloads, pendrive.
+- Não requer administrador nem regra de firewall (o app apenas **envia** UDP,
+  liberado por padrão no Windows).
+- Detecta MSFS 2020/2024 (Store e Steam) sozinho, em tempo de execução.
+- Se você mover o .exe de lugar, o "Iniciar junto com o MSFS" se reajusta no
+  próximo início.
+
+<details>
+<summary>O que o app grava fora do .exe</summary>
+
+| Caminho | Conteúdo |
+|---|---|
+| `%APPDATA%\2G GPS Cliente\settings.json` | Suas configurações |
+| `%LOCALAPPDATA%\2G GPS Cliente\runtime\<versão>\` | As duas DLLs do SimConnect, extraídas na 1ª execução |
+| `EXE.xml` do MSFS | Só se "Iniciar junto com o MSFS" estiver marcado |
+
+A primeira execução é um pouco mais lenta (o .exe se descompacta); as seguintes
+são normais.
+
+</details>
+
+> Também é publicado um instalador (`2G-GPS-Cliente-Setup-x.y.z.exe`) para quem
+> prefere atalho no Menu Iniciar e entrada em "Adicionar ou remover programas".
+> Ele instala exatamente o mesmo arquivo único.
 
 > **Aviso SmartScreen**: builds não assinados digitalmente exibem o alerta
 > "O Windows protegeu seu computador" — clique em *Mais informações → Executar
@@ -62,17 +83,36 @@ src/TwoG.GpsClient/        App WPF (.NET 10, x64) — UI, SimConnect, broadcaste
 src/TwoG.GpsClient.Core/   Lógica pura do protocolo (multiplataforma, testável)
 tests/                     Testes de unidade do protocolo
 libs/                      DLLs oficiais do SimConnect (MSFS SDK 0.24.3.0)
-installer/setup.iss        Instalador Inno Setup
+installer/setup.iss        Instalador Inno Setup (opcional)
 ```
 
 ```bash
-dotnet test                                        # roda em qualquer SO
-dotnet build src/TwoG.GpsClient -c Release         # compila até em macOS/Linux (EnableWindowsTargeting)
+dotnet test tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj
 ```
 
-O executável só roda no Windows (SimConnect é x64/Windows). O pipeline de CI
-(`.github/workflows/build.yml`) publica self-contained, compila o instalador e anexa
-os artefatos; tags `v*` geram release automaticamente.
+```bash
+dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj -c Release -o publish
+```
+
+Ambos rodam em qualquer SO (o csproj tem `EnableWindowsTargeting` e RID fixo
+`win-x64`); o publish gera o `.exe` único mesmo a partir do macOS/Linux, mas o
+binário só **executa** no Windows (SimConnect é x64/Windows). O CI
+(`.github/workflows/build.yml`) publica, **valida que a saída é 1 arquivo só**,
+compila o instalador e anexa os artefatos; tags `v*` geram release automaticamente.
+
+### Como o .exe único funciona
+
+O publish usa `PublishSingleFile` + `IncludeNativeLibrariesForSelfExtract` +
+`EnableCompressionInSingleFile` (definidos no csproj). As duas DLLs do SimConnect
+ficam **fora** do bundle: o wrapper gerenciado é *mixed-mode* C++/CLI, e a
+[doc da Microsoft](https://learn.microsoft.com/en-us/dotnet/core/deploying/single-file/overview)
+avisa que componentes managed C++ não são adequados a single-file (assemblies do
+bundle são carregados da memória, o que não funciona para mixed-mode). Em vez
+disso elas viajam como **recursos embutidos** e o
+[`SimConnectRuntime`](src/TwoG.GpsClient/Services/SimConnectRuntime.cs) as extrai
+para `%LOCALAPPDATA%` na primeira execução, pré-carrega a nativa via `LoadLibraryEx`
+e resolve a gerenciada por `AssemblyLoadContext.Default.Resolving` — carregamento
+a partir de arquivos reais em disco, que é o cenário suportado.
 
 ### Protocolo XGPS (referência)
 

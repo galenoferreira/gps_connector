@@ -32,27 +32,37 @@ jobs:
           echo "VERSION=$v" >> $env:GITHUB_ENV
 
       - name: Test
-        run: dotnet test tests/TwoG.GpsClient.Core.Tests -c Release
+        run: dotnet test tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj -c Release
 
-      - name: Publish (self-contained win-x64)
+      # Produz UM único .exe autocontido: as opções de single-file estão no csproj
+      # (PublishSingleFile, SelfContained, IncludeNativeLibrariesForSelfExtract,
+      # EnableCompressionInSingleFile) junto com RuntimeIdentifier=win-x64.
+      - name: Publish (single-file)
         run: >
           dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj
-          -c Release -r win-x64 --self-contained true
+          -c Release
           -p:PublishReadyToRun=true
           -p:Version=${{ env.VERSION }}
           -o publish
 
-      - name: Compile installer
+      - name: Verify single-file output
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem publish -File
+          $files | Format-Table Name, Length
+          if ($files.Count -ne 1 -or $files[0].Name -ne '2G-GPS-Cliente.exe') {
+            throw "Esperado exatamente 1 arquivo (2G-GPS-Cliente.exe), obtido: $($files.Name -join ', ')"
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item publish\2G-GPS-Cliente.exe "dist\2G-GPS-Cliente-$($env:VERSION).exe"
+
+      - name: Compile installer (opcional, para quem prefere atalhos/desinstalador)
         shell: pwsh
         run: |
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
             choco install innosetup -y --no-progress
           }
           iscc .\installer\setup.iss /DAppVersion="${{ env.VERSION }}"
-
-      - name: Package portable zip
-        shell: pwsh
-        run: Compress-Archive -Path publish\* -DestinationPath "dist\2G-GPS-Cliente-portable-${{ env.VERSION }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:

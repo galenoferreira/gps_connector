@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    O repositório vive num volume não-HFS: o macOS grava arquivos AppleDouble "._algo"
+    ao lado de cada fonte, e os globs padrão do SDK os capturam — o compilador então
+    falha com "is a binary file instead of a text file". Removidos aqui (Directory.Build.targets
+    é importado DEPOIS dos globs padrão, ao contrário do .props).
+  -->
+  <ItemGroup>
+    <Compile Remove="**/._*" />
+    <None Remove="**/._*" />
+    <EmbeddedResource Remove="**/._*" />
+    <Page Remove="**/._*" />
+    <Resource Remove="**/._*" />
+    <ApplicationDefinition Remove="**/._*" />
+  </ItemGroup>
+
+</Project>

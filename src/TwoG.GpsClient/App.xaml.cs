@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using TwoG.GpsClient.Configuration;
 using TwoG.GpsClient.Services;
@@ -12,8 +13,16 @@ public partial class App : Application
 
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _showEvent;
-    private SimConnectService? _sim;
+    private ISimSource? _sim;
     private XgpsBroadcaster? _broadcaster;
+
+    /// <summary>
+    /// Isolado e sem inline de propósito: o JIT deste método é o primeiro ponto que
+    /// carrega tipos do SimConnect, e ele só acontece na chamada — depois de
+    /// <see cref="SimConnectRuntime.Ensure"/> ter extraído e registrado as DLLs.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static ISimSource CreateSimSource() => new SimConnectService();
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -55,7 +64,11 @@ public partial class App : Application
         var settingsService = new SettingsService();
         var settings = settingsService.Load();
 
-        _sim = new SimConnectService();
+        // Extrai as DLLs do SimConnect (recursos embutidos) antes de tocar em
+        // qualquer tipo do SimConnect.
+        SimConnectRuntime.Ensure();
+
+        _sim = CreateSimSource();
         _broadcaster = new XgpsBroadcaster(_sim, settings);
         var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings);
 

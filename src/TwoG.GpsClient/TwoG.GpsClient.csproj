@@ -13,6 +13,18 @@
     <Platforms>x64</Platforms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
+    <!-- Distribuição: um único .exe autocontido, sem instalador nem runtime .NET.
+         O RID é fixo (o app só roda em Windows x64), então `dotnet publish` não
+         precisa de -r e o build local não tenta inferir o RID do host. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Símbolos dentro do assembly: evita .pdb solto ao lado do exe. -->
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
     <Version>1.0.0</Version>
     <Product>2G GPS Cliente for MSFS</Product>
     <Company>2G</Company>
@@ -27,16 +39,25 @@
 
   <!--
     DLLs oficiais do SimConnect (MSFS SDK 0.24.3.0), vendorizadas em /libs — não há
-    pacote NuGet oficial. O wrapper gerenciado é mixed-mode x64 e funciona em .NET
-    moderno; um cliente da era 2020 conecta ao MSFS 2020 E 2024 (confirmado pela
-    Asobo). Mesma arquitetura do fs2ff. A SimConnect.dll nativa precisa estar ao
-    lado do exe: o Reference copia a gerenciada, o None copia a nativa.
+    pacote NuGet oficial. Um cliente da era 2020 conecta ao MSFS 2020 E 2024
+    (confirmado pela Asobo). Mesma arquitetura do fs2ff.
+
+    Elas NÃO são copiadas para a saída (Private=false) nem entram no bundle
+    single-file: o wrapper gerenciado é mixed-mode (C++/CLI) e a doc da Microsoft
+    diz que "managed C++ components aren't well suited for single file deployment"
+    — não é carregável a partir da memória do bundle. Em vez disso, viajam como
+    recursos embutidos e o SimConnectRuntime as extrai para o cache do usuário na
+    primeira execução, carregando-as de arquivos reais em disco (cenário suportado).
   -->
   <ItemGroup>
     <Reference Include="Microsoft.FlightSimulator.SimConnect">
       <HintPath>..\..\libs\Microsoft.FlightSimulator.SimConnect.dll</HintPath>
+      <Private>false</Private>
     </Reference>
-    <None Include="..\..\libs\SimConnect.dll" Link="SimConnect.dll" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="..\..\libs\Microsoft.FlightSimulator.SimConnect.dll"
+                      LogicalName="TwoG.GpsClient.Native.Microsoft.FlightSimulator.SimConnect.dll" />
+    <EmbeddedResource Include="..\..\libs\SimConnect.dll"
+                      LogicalName="TwoG.GpsClient.Native.SimConnect.dll" />
   </ItemGroup>
 
   <ItemGroup>

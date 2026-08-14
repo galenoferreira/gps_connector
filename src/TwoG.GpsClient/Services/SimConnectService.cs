@@ -56,6 +56,7 @@ public sealed class SimConnectService : ISimSource
     private volatile SimConnectionState _state = SimConnectionState.Searching;
     private volatile string? _simulatorName;
     private volatile GpsFix? _latestFix;
+    private volatile string? _lastError;
 
     public SimConnectionState State
     {
@@ -76,6 +77,8 @@ public sealed class SimConnectService : ISimSource
     public string? SimulatorName => _simulatorName;
 
     public GpsFix? LatestFix => _latestFix;
+
+    public string? LastError => SimConnectRuntime.Error ?? _lastError;
 
     public void Start()
     {
@@ -149,11 +152,19 @@ public sealed class SimConnectService : ISimSource
             sim.OnRecvEvent += OnRecvEvent;
             sim.OnRecvSimobjectData += OnRecvSimobjectData;
             _sim = sim;
+            _lastError = null;
         }
         catch (COMException)
         {
             // Simulador não está aberto (0x80040108); a próxima tentativa vem em 3 s.
             _sim = null;
+        }
+        catch (Exception ex)
+        {
+            // Falha estrutural (DLLs do SimConnect ausentes/inválidas): registra para
+            // a UI em vez de derrubar a thread — e segue tentando.
+            _sim = null;
+            _lastError = ex.Message;
         }
     }
 

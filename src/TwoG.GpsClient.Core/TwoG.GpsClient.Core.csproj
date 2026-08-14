@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Símbolos dentro do assembly: nada de .pdb solto na pasta de publish. -->
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
 </Project>

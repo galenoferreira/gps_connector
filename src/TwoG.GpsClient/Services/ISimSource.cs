@@ -25,6 +25,12 @@ public interface ISimSource : IDisposable
     /// <summary>Última amostra recebida (referência atômica; pode ser lida de qualquer thread).</summary>
     GpsFix? LatestFix { get; }
 
+    /// <summary>
+    /// Falha persistente que impede a conexão (ex.: DLLs do SimConnect indisponíveis),
+    /// ou null quando o único motivo de não estar conectado é o simulador estar fechado.
+    /// </summary>
+    string? LastError { get; }
+
     void Start();
     void Stop();
 }
