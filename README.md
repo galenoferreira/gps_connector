@@ -6,11 +6,31 @@
 
 <p align="center">
   Conector Windows que transmite a posição do <b>Microsoft Flight Simulator 2020/2024</b>
-  para qualquer EFB na rede — <b>2G Pilot</b>, ForeFlight, Garmin Pilot, SkyDemon e outros —
-  usando o protocolo <b>XGPS</b> (broadcast UDP, porta 49002).
+  para o seu EFB, usando o protocolo <b>XGPS</b> (broadcast UDP, porta 49002).
+</p>
+
+<p align="center">
+  <a href="https://github.com/galenoferreira/gps_connector/releases/latest"><img src="https://img.shields.io/github/v/release/galenoferreira/gps_connector?label=vers%C3%A3o" alt="Versão" /></a>
+  <img src="https://img.shields.io/badge/Windows-x64-0078D4" alt="Windows x64" />
+  <img src="https://img.shields.io/badge/MSFS-2020%20%7C%202024-1B7F8E" alt="MSFS 2020 e 2024" />
 </p>
 
 ---
+
+## EFBs suportados
+
+| EFB | Configuração necessária |
+|---|---|
+| **2G Pilot EFB** | Nenhuma — basta estar na mesma rede Wi-Fi do PC |
+| **ForeFlight** | Nenhuma — o dispositivo aparece sozinho em **More → Devices** |
+
+Voando, o EFB passa a usar a posição do simulador no lugar do GPS do aparelho.
+No ForeFlight, a barra de instrumentos mostra a precisão identificada pelo nome do
+dispositivo (ex.: *Accuracy (2G GPS)*), e a atitude enviada alimenta o horizonte
+do Synthetic Vision.
+
+> Outros EFBs que leem o protocolo XGPS na porta 49002 tendem a funcionar, mas
+> não são testados nem oficialmente suportados.
 
 ## Como funciona
 
@@ -18,45 +38,44 @@
 MSFS 2020/2024 ──SimConnect──▶ 2G GPS Cliente ──UDP 49002 (XGPS/XATT)──▶ EFB (tablet/celular)
 ```
 
-- **Conexão automática**: o app tenta se conectar ao simulador a cada 3 segundos; basta
-  abrir o MSFS em qualquer ordem. Suporta MSFS 2020 e MSFS 2024 (Microsoft Store e Steam)
+- **Conexão automática**: o app procura o simulador a cada 3 segundos — pode abrir
+  o MSFS antes ou depois, tanto faz. MSFS 2020 e 2024, Microsoft Store e Steam,
   com um único binário.
-- **Transmissão XGPS**: posição (`XGPS`) e atitude (`XATT`) enviadas por broadcast dirigido
-  em todas as interfaces de rede ativas + unicast opcional para IPs específicos.
-  Padrão: 5 Hz (configurável na interface).
-- **Iniciar junto com o MSFS**: o app se registra no `EXE.xml` do simulador
-  (mecanismo padrão usado por FSUIPC7 etc.), com merge seguro e backup — nunca
-  sobrescreve entradas de outros add-ons. Auto-repara o registro a cada execução.
-- **Bandeja do sistema**: fechar a janela mantém a transmissão ativa na bandeja.
-
-No EFB não há nada para configurar: com o tablet na mesma rede Wi-Fi do PC, o
-dispositivo "2G GPS" aparece automaticamente (no ForeFlight: **More → Devices**).
+- **Transmissão**: posição (`XGPS`) e atitude (`XATT`) por broadcast dirigido em
+  todas as interfaces de rede ativas, mais unicast opcional para IPs específicos.
+  Padrão de 5 Hz, ajustável na interface.
+- **Pausa inteligente**: com o simulador pausado ou no menu, a transmissão para e
+  retoma sozinha quando o voo volta — o EFB não fica com a aeronave congelada.
+- **Iniciar junto com o MSFS**: registra-se no `EXE.xml` do simulador com merge
+  seguro e backup, sem tocar nas entradas de outros add-ons. Se um update do MSFS
+  apagar o registro, ele se refaz na execução seguinte.
+- **Bandeja do sistema**: fechar a janela mantém a transmissão ativa em segundo
+  plano; para encerrar de fato, use **Sair** no menu da bandeja.
 
 ## Download
 
-Estes links são **permanentes** e sempre entregam a versão mais recente — podem
-ser fixados no site sem precisar de atualização a cada release:
+Links **permanentes** — sempre entregam a versão mais recente, sem precisar de
+atualização a cada release:
 
 | Link | Para quem |
 |---|---|
 | [**2G-GPS-Cliente.exe**](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente.exe) | **Recomendado** — executável único, sem instalação |
 | [2G-GPS-Cliente.zip](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente.zip) | Mesmo executável, compactado |
 | [2G-GPS-Cliente-Setup.exe](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente-Setup.exe) | Instalador com atalho no Menu Iniciar e desinstalador |
-| [Página de releases](https://github.com/galenoferreira/gps_connector/releases/latest) | Notas da versão e checksums |
+| [Página de releases](https://github.com/galenoferreira/gps_connector/releases/latest) | Notas da versão e checksums SHA-256 |
 
 ## Instalação
 
-**Não há instalação.** Baixe o `.exe` e execute — um único arquivo, sem pasta de
-dependências, sem instalador e sem precisar do runtime .NET.
+**Não há instalação.** Baixe o `.exe` e execute — um arquivo só, sem pasta de
+dependências e sem instalador.
 
-- Rode de onde quiser: Desktop, Downloads, pendrive.
+- **Zero pré-requisitos**: o runtime .NET e o Visual C++ Redistributable viajam
+  dentro do executável.
 - Não requer administrador nem regra de firewall (o app apenas **envia** UDP,
   liberado por padrão no Windows).
-- **Zero pré-requisitos**: runtime .NET e Visual C++ Redistributable viajam dentro
-  do executável.
-- Detecta MSFS 2020/2024 (Store e Steam) sozinho, em tempo de execução.
-- Se você mover o .exe de lugar, o "Iniciar junto com o MSFS" se reajusta no
-  próximo início.
+- Rode de onde quiser: Desktop, Downloads, pendrive.
+- Detecta o MSFS sozinho, em tempo de execução. Se você mover o `.exe` de lugar,
+  o "Iniciar junto com o MSFS" se reajusta na próxima abertura.
 
 <details>
 <summary>O que o app grava fora do .exe</summary>
@@ -68,27 +87,24 @@ dependências, sem instalador e sem precisar do runtime .NET.
 | `%LOCALAPPDATA%\2G GPS Cliente\erro.log` | Só se ocorrer um erro inesperado |
 | `EXE.xml` do MSFS | Só se "Iniciar junto com o MSFS" estiver marcado |
 
-A primeira execução é um pouco mais lenta (o .exe se descompacta); as seguintes
-são normais.
+A primeira execução é um pouco mais lenta, porque o executável se descompacta;
+as seguintes são normais.
 
 </details>
 
-> Também é publicado um instalador (`2G-GPS-Cliente-Setup-x.y.z.exe`) para quem
-> prefere atalho no Menu Iniciar e entrada em "Adicionar ou remover programas".
-> Ele instala exatamente o mesmo arquivo único.
-
-> **Aviso SmartScreen**: builds não assinados digitalmente exibem o alerta
-> "O Windows protegeu seu computador" — clique em *Mais informações → Executar
-> assim mesmo*. É o comportamento padrão para executáveis novos sem assinatura.
+> **Aviso SmartScreen**: builds sem assinatura digital exibem *"O Windows protegeu
+> seu computador"* — clique em **Mais informações → Executar assim mesmo**. É o
+> comportamento padrão do Windows para executáveis novos não assinados.
 
 ## Solução de problemas
 
 | Sintoma | Causa provável |
 |---|---|
-| EFB não recebe posição | Tablet em outra rede/sub-rede Wi-Fi; ou o roteador/AP tem "isolamento de clientes" (AP/client isolation) ativado |
-| Recebe em um EFB mas não em outro | Porta 49002 em uso por outro conector (feche outros bridges GPS) |
-| Posição congela no EFB | Simulador pausado ou no menu — a transmissão pausa automaticamente e retoma no voo |
-| Tablet em sub-rede diferente | Adicione o IP do tablet em **Configurações → IPs adicionais** (unicast) |
+| EFB não recebe posição | Tablet em outra rede/sub-rede Wi-Fi, ou o roteador/AP está com "isolamento de clientes" (AP/client isolation) ligado |
+| Tablet em sub-rede diferente | Informe o IP do tablet em **Configurações → IPs adicionais** (unicast) |
+| Posição congela no EFB | Simulador pausado ou no menu — normal; retoma sozinho no voo |
+| Recebe em um EFB mas não em outro | Porta 49002 ocupada por outro conector — feche outras pontes de GPS |
+| "Falha ao inicializar o SimConnect" | Consulte `%LOCALAPPDATA%\2G GPS Cliente\erro.log` e [abra uma issue](https://github.com/galenoferreira/gps_connector/issues) com a mensagem |
 
 ## Desenvolvimento
 
@@ -96,7 +112,7 @@ são normais.
 src/TwoG.GpsClient/        App WPF (.NET 10, x64) — UI, SimConnect, broadcaster
 src/TwoG.GpsClient.Core/   Lógica pura do protocolo (multiplataforma, testável)
 tests/                     Testes de unidade do protocolo
-libs/                      DLLs oficiais do SimConnect (MSFS SDK 0.24.3.0)
+libs/                      DLLs do SimConnect (MSFS SDK) e do runtime VC++ x64
 installer/setup.iss        Instalador Inno Setup (opcional)
 ```
 
@@ -108,9 +124,9 @@ dotnet test tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj
 dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj -c Release -o publish
 ```
 
-Ambos rodam em qualquer SO (o csproj tem `EnableWindowsTargeting` e RID fixo
-`win-x64`); o publish gera o `.exe` único mesmo a partir do macOS/Linux, mas o
-binário só **executa** no Windows (SimConnect é x64/Windows).
+Ambos rodam em qualquer sistema operacional — o csproj traz `EnableWindowsTargeting`
+e RID fixo `win-x64`, então o publish gera o `.exe` até a partir de macOS/Linux.
+O binário, porém, só **executa** no Windows: o SimConnect é x64/Windows.
 
 ### Publicar uma nova versão
 
@@ -118,31 +134,29 @@ binário só **executa** no Windows (SimConnect é x64/Windows).
 git tag v1.1.0 && git push origin v1.1.0
 ```
 
-Só isso. O CI (`.github/workflows/build.yml`) roda os testes, publica o `.exe`
-único, **valida que a saída tem exatamente 1 arquivo**, compila o instalador,
-gera os checksums e cria o Release com as notas automáticas. A versão da tag vira
-a versão do executável (visível nas propriedades do arquivo).
+Só isso. O CI roda os testes, publica o executável único, **valida que a saída tem
+exatamente 1 arquivo**, compila o instalador, gera os checksums e cria o Release
+com notas automáticas. A versão da tag vira a versão do binário.
 
-Os arquivos do Release **não levam a versão no nome** — é o que mantém os links
-de download permanentes funcionando. A versão fica na tag e nas propriedades do
-binário.
-
-Tags com hífen (`v1.1.0-beta.1`) entram como **pré-release** e não assumem o
-`latest`, então não afetam os links fixos do site.
+Os arquivos do Release **não levam versão no nome** — é o que mantém os links de
+download permanentes válidos. Tags com hífen (`v1.1.0-beta.1`) entram como
+pré-release e não assumem o `latest`, preservando esses links.
 
 ### Como o .exe único funciona
 
 O publish usa `PublishSingleFile` + `IncludeNativeLibrariesForSelfExtract` +
-`EnableCompressionInSingleFile` (definidos no csproj). As duas DLLs do SimConnect
-ficam **fora** do bundle: o wrapper gerenciado é *mixed-mode* C++/CLI, e a
-[doc da Microsoft](https://learn.microsoft.com/en-us/dotnet/core/deploying/single-file/overview)
-avisa que componentes managed C++ não são adequados a single-file (assemblies do
-bundle são carregados da memória, o que não funciona para mixed-mode). Em vez
-disso elas viajam como **recursos embutidos** e o
+`EnableCompressionInSingleFile`, definidos no csproj. As DLLs do SimConnect ficam
+**fora** do bundle: o wrapper gerenciado é *mixed-mode* C++/CLI, e a
+[documentação da Microsoft](https://learn.microsoft.com/en-us/dotnet/core/deploying/single-file/overview)
+avisa que componentes managed C++ não são adequados a single-file — assemblies do
+bundle são carregados da memória, o que não funciona para mixed-mode.
+
+Em vez disso, elas viajam como **recursos embutidos** e o
 [`SimConnectRuntime`](src/TwoG.GpsClient/Services/SimConnectRuntime.cs) as extrai
-para `%LOCALAPPDATA%` na primeira execução, pré-carrega a nativa via `LoadLibraryEx`
-e resolve a gerenciada por `AssemblyLoadContext.Default.Resolving` — carregamento
-a partir de arquivos reais em disco, que é o cenário suportado.
+para `%LOCALAPPDATA%` na primeira execução, carregando-as de arquivos reais em
+disco. Junto vão `MSVCP140.dll`, `VCRUNTIME140.dll` e `VCRUNTIME140_1.dll`, que a
+`SimConnect.dll` importa: sem elas, uma máquina que nunca instalou o Visual C++
+Redistributable falha com `erro 126` (`ERROR_MOD_NOT_FOUND`).
 
 ### Protocolo XGPS (referência)
 
@@ -151,13 +165,14 @@ XGPS<nome>,<lon>,<lat>,<alt m MSL>,<curso verdadeiro °>,<vel. solo m/s>
 XATT<nome>,<proa verdadeira °>,<pitch °>,<roll °>,,,,,,,,,
 ```
 
-Uma sentença por datagrama UDP, ASCII, decimal com ponto, sem terminador.
-Pitch positivo = nariz para cima; roll positivo = asa direita (convenção X-Plane —
-os sinais do MSFS são invertidos pelo conector). Os 9 campos vazios do `XATT`
-atendem ao Garmin Pilot (exige 13 campos); ForeFlight ignora os extras.
+Uma sentença por datagrama UDP, ASCII, separador decimal ponto, sem terminador de
+linha. Pitch positivo = nariz para cima; roll positivo = asa direita — convenção
+do X-Plane, e os sinais do MSFS são invertidos pelo conector. Os 9 campos vazios
+finais do `XATT` completam os 13 campos que alguns EFBs esperam; o ForeFlight
+ignora os extras.
 
-> **Nota**: a spec da ForeFlight recomenda posição a 1 Hz e atitude a 4–10 Hz.
-> O padrão do produto é 5 Hz para ambos; ajuste na UI se necessário.
+> A especificação da ForeFlight recomenda posição a 1 Hz e atitude a 4–10 Hz.
+> O padrão deste produto é 5 Hz para ambas, ajustável na interface.
 
 ---
 
