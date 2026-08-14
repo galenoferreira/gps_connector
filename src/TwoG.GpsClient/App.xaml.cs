@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using TwoG.GpsClient.Configuration;
@@ -27,6 +28,15 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Sem isto, qualquer exceção não tratada fecha o app sem deixar rastro.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            ReportFatal(args.Exception);
+            args.Handled = true;
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            ReportFatal(args.ExceptionObject as Exception);
 
         // Chamado pelo desinstalador: remove nossas entradas dos EXE.xml e sai.
         if (e.Args.Any(a => string.Equals(a, "-unregister", StringComparison.OrdinalIgnoreCase)))
@@ -108,6 +118,42 @@ public partial class App : Application
                     // Melhor esforço; o usuário pode ressincronizar pela UI.
                 }
             });
+        }
+    }
+
+    /// <summary>
+    /// Registra a falha em disco e avisa o usuário, em vez de sumir da tela.
+    /// </summary>
+    private static void ReportFatal(Exception? ex)
+    {
+        if (ex is null)
+            return;
+
+        var logPath = "";
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "2G GPS Cliente");
+            Directory.CreateDirectory(dir);
+            logPath = Path.Combine(dir, "erro.log");
+            File.AppendAllText(logPath,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // Sem log é ruim, mas não impede o aviso na tela.
+        }
+
+        try
+        {
+            var detail = logPath.Length > 0 ? $"{Environment.NewLine}{Environment.NewLine}Detalhes em: {logPath}" : "";
+            MessageBox.Show($"Ocorreu um erro inesperado:{Environment.NewLine}{Environment.NewLine}{ex.Message}{detail}",
+                "2G GPS Cliente", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        catch (Exception)
+        {
+            // Se nem MessageBox funciona, não há mais o que fazer.
         }
     }
 

@@ -25,7 +25,9 @@ para EFBs — 2G Pilot, ForeFlight, SkyDemon etc.
 - Taxas padrão: 5 Hz para XGPS e XATT (decisão do produto; configurável na UI).
 - **Entrega é UM único .exe** (`PublishSingleFile` no csproj, RID fixo `win-x64`).
   As DLLs do SimConnect NÃO podem entrar no bundle (mixed-mode C++/CLI não carrega
-  da memória) — são recursos embutidos extraídos pelo `SimConnectRuntime`.
+  da memória) — são recursos embutidos extraídos pelo `SimConnectRuntime`, junto
+  com o runtime VC++ x64 em `libs/vcruntime/` (a SimConnect.dll nativa importa
+  MSVCP140/VCRUNTIME140/VCRUNTIME140_1; sem elas dá erro 126 em máquina sem MSFS).
   Nunca adicionar arquivos soltos à saída de publish: o CI falha se houver mais de um.
 - Neste volume (exFAT) o macOS cria arquivos `._*` que quebram o build; o
   `Directory.Build.targets` os remove dos globs, mas passe sempre o caminho do

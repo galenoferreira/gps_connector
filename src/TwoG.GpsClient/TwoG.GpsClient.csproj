@@ -60,6 +60,23 @@
                       LogicalName="TwoG.GpsClient.Native.SimConnect.dll" />
   </ItemGroup>
 
+  <!--
+    Runtime do Visual C++ 2015-2022 x64, extraído do vc_redist.x64.exe oficial.
+    A SimConnect.dll nativa importa MSVCP140/VCRUNTIME140/VCRUNTIME140_1; sem elas
+    o LoadLibrary falha com erro 126 (ERROR_MOD_NOT_FOUND) em máquinas que nunca
+    instalaram o redistributable (o MSFS o instala, mas não queremos depender disso).
+    A Microsoft permite a distribuição "app-local" destas DLLs. São extraídas para
+    a mesma pasta da SimConnect.dll e pré-carregadas antes dela.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\libs\vcruntime\MSVCP140.dll"
+                      LogicalName="TwoG.GpsClient.Native.MSVCP140.dll" />
+    <EmbeddedResource Include="..\..\libs\vcruntime\VCRUNTIME140.dll"
+                      LogicalName="TwoG.GpsClient.Native.VCRUNTIME140.dll" />
+    <EmbeddedResource Include="..\..\libs\vcruntime\VCRUNTIME140_1.dll"
+                      LogicalName="TwoG.GpsClient.Native.VCRUNTIME140_1.dll" />
+  </ItemGroup>
+
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
   </ItemGroup>

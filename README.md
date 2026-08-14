@@ -52,6 +52,8 @@ dependências, sem instalador e sem precisar do runtime .NET.
 - Rode de onde quiser: Desktop, Downloads, pendrive.
 - Não requer administrador nem regra de firewall (o app apenas **envia** UDP,
   liberado por padrão no Windows).
+- **Zero pré-requisitos**: runtime .NET e Visual C++ Redistributable viajam dentro
+  do executável.
 - Detecta MSFS 2020/2024 (Store e Steam) sozinho, em tempo de execução.
 - Se você mover o .exe de lugar, o "Iniciar junto com o MSFS" se reajusta no
   próximo início.
@@ -62,7 +64,8 @@ dependências, sem instalador e sem precisar do runtime .NET.
 | Caminho | Conteúdo |
 |---|---|
 | `%APPDATA%\2G GPS Cliente\settings.json` | Suas configurações |
-| `%LOCALAPPDATA%\2G GPS Cliente\runtime\<versão>\` | As duas DLLs do SimConnect, extraídas na 1ª execução |
+| `%LOCALAPPDATA%\2G GPS Cliente\runtime\<versão>\` | DLLs do SimConnect e do runtime C++, extraídas na 1ª execução |
+| `%LOCALAPPDATA%\2G GPS Cliente\erro.log` | Só se ocorrer um erro inesperado |
 | `EXE.xml` do MSFS | Só se "Iniciar junto com o MSFS" estiver marcado |
 
 A primeira execução é um pouco mais lenta (o .exe se descompacta); as seguintes

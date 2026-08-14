@@ -71,7 +71,7 @@
                     <TextBlock Text="{Binding SimStatusText}" FontSize="14.5" FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}" Margin="9,0,0,0" VerticalAlignment="Center" />
                 </StackPanel>
-                <TextBlock Text="{Binding SimDetail}" FontSize="11.5"
+                <TextBlock Text="{Binding SimDetail}" FontSize="11.5" TextWrapping="Wrap"
                            Foreground="{StaticResource DimBrush}" Margin="19,3,0,0" />
             </StackPanel>
         </Border>
