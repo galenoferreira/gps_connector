@@ -54,13 +54,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [CustomMessages]
 brazilianportuguese.DetectCaption=Detecção do Simulador
 brazilianportuguese.DetectDescription=Procurando instalações do Microsoft Flight Simulator
-brazilianportuguese.DetectSubCaption=O instalador verificou os locais padrão do MSFS 2020 e MSFS 2024 (Microsoft Store e Steam):
+brazilianportuguese.DetectSubCaption=O instalador verificou os locais padrão do MSFS 2020/2024 (Microsoft Store e Steam) e do Prepar3D:
 brazilianportuguese.DetectFound=Simuladores encontrados neste computador:
 brazilianportuguese.DetectNone=Nenhuma instalação do Microsoft Flight Simulator foi encontrada.%n%nVocê pode continuar mesmo assim — o aplicativo detecta o simulador automaticamente quando ele estiver instalado e aberto.
 brazilianportuguese.AutostartTask=Iniciar automaticamente com o Windows
 english.DetectCaption=Simulator Detection
 english.DetectDescription=Looking for Microsoft Flight Simulator installations
-english.DetectSubCaption=Setup checked the standard locations for MSFS 2020 and MSFS 2024 (Microsoft Store and Steam):
+english.DetectSubCaption=Setup checked the standard locations for MSFS 2020/2024 (Microsoft Store and Steam) and Prepar3D:
 english.DetectFound=Simulators found on this computer:
 english.DetectNone=No Microsoft Flight Simulator installation was found.%n%nYou can continue anyway — the app detects the simulator automatically once it is installed and running.
 english.AutostartTask=Start automatically with Windows
@@ -98,6 +98,12 @@ begin
     Result := Result + '   •  MSFS 2020 (Microsoft Store)' + #13#10;
   if FileExists(ExpandConstant('{userappdata}\Microsoft Flight Simulator\UserCfg.opt')) then
     Result := Result + '   •  MSFS 2020 (Steam)' + #13#10;
+  if FileExists(ExpandConstant('{userappdata}\Lockheed Martin\Prepar3D v6\Prepar3D.cfg')) then
+    Result := Result + '   •  Prepar3D v6' + #13#10;
+  if FileExists(ExpandConstant('{userappdata}\Lockheed Martin\Prepar3D v5\Prepar3D.cfg')) then
+    Result := Result + '   •  Prepar3D v5' + #13#10;
+  if FileExists(ExpandConstant('{userappdata}\Lockheed Martin\Prepar3D v4\Prepar3D.cfg')) then
+    Result := Result + '   •  Prepar3D v4' + #13#10;
 
   if Result <> '' then
     Result := ExpandConstant('{cm:DetectFound}') + #13#10 + #13#10 + Result

@@ -32,6 +32,22 @@ do Synthetic Vision.
 > Outros EFBs que leem o protocolo XGPS na porta 49002 tendem a funcionar, mas
 > não são testados nem oficialmente suportados.
 
+## Simuladores suportados
+
+| Simulador | Situação |
+|---|---|
+| **MSFS 2024** (Microsoft Store e Steam) | ✅ Suportado |
+| **MSFS 2020** (Microsoft Store e Steam) | ✅ Suportado |
+| **Prepar3D v4 / v5 / v6** | 🧪 **Experimental** — implementado, ainda não validado com o simulador real |
+| FSX, Prepar3D v1–v3 | ❌ Fora de escopo (SimConnect só 32 bits) |
+
+O Prepar3D usa a mesma API SimConnect do MSFS, com as mesmas variáveis e
+convenções de sinal, então o mesmo caminho de código atende aos dois. Se você
+testar, [conte como foi](https://github.com/galenoferreira/gps_connector/issues) —
+o app mostra na tela se o simulador foi detectado e se a conexão foi aceita.
+
+Suporte a X-Plane está avaliado no [estudo multi-simulador](docs/estudo-multi-simulador.md).
+
 ## Como funciona
 
 ```
@@ -39,8 +55,8 @@ MSFS 2020/2024 ──SimConnect──▶ 2G GPS Cliente ──UDP 49002 (XGPS/XA
 ```
 
 - **Conexão automática**: o app procura o simulador a cada 3 segundos — pode abrir
-  o MSFS antes ou depois, tanto faz. MSFS 2020 e 2024, Microsoft Store e Steam,
-  com um único binário.
+  o simulador antes ou depois, tanto faz. Um único binário atende MSFS 2020, MSFS
+  2024 (Store e Steam) e Prepar3D.
 - **Transmissão**: posição (`XGPS`) e atitude (`XATT`) por broadcast dirigido em
   todas as interfaces de rede ativas, mais unicast opcional para IPs específicos.
   Padrão de 5 Hz, ajustável na interface.

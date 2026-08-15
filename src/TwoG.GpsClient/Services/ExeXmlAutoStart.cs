@@ -43,7 +43,7 @@ public sealed class ExeXmlAutoStart
     public IReadOnlyList<SyncResult> Sync(bool enabled)
     {
         var results = new List<SyncResult>();
-        foreach (var install in MsfsInstallations.Detected())
+        foreach (var install in SimulatorInstallations.Detected())
         {
             try
             {
@@ -60,7 +60,7 @@ public sealed class ExeXmlAutoStart
     /// <summary>Remove o registro em todas as instalações (usado pelo desinstalador via "-unregister").</summary>
     public void UnregisterEverywhere()
     {
-        foreach (var install in MsfsInstallations.Detected())
+        foreach (var install in SimulatorInstallations.Detected())
         {
             try
             {
@@ -73,7 +73,7 @@ public sealed class ExeXmlAutoStart
         }
     }
 
-    private SyncResult Register(MsfsInstall install)
+    private SyncResult Register(SimInstall install)
     {
         var exePath = ExePath;
         if (exePath is null)
@@ -123,7 +123,7 @@ public sealed class ExeXmlAutoStart
         return new SyncResult(install.DisplayName, true, "registrado");
     }
 
-    private SyncResult Unregister(MsfsInstall install)
+    private SyncResult Unregister(SimInstall install)
     {
         if (!File.Exists(install.ExeXmlPath))
             return new SyncResult(install.DisplayName, true, "sem registro");

@@ -5,8 +5,12 @@ using TwoG.GpsClient.Core;
 namespace TwoG.GpsClient.Services;
 
 /// <summary>
-/// Conecta ao MSFS 2020/2024 via SimConnect (API oficial, DLLs entregues pelo pacote
-/// CTrue.FsConnect) e mantém <see cref="LatestFix"/> atualizado.
+/// Conecta a um simulador que fale SimConnect — MSFS 2020/2024 e, pela mesma API,
+/// Prepar3D v4+ — e mantém <see cref="LatestFix"/> atualizado.
+///
+/// As SimVars e as convenções de sinal são herdadas do FSX e valem igualmente para
+/// o Prepar3D, então não há caminho de código separado por simulador; o que muda é
+/// apenas o nome exibido, derivado do SIMCONNECT_RECV_OPEN.
 ///
 /// Arquitetura: uma única thread de fundo é dona do objeto SimConnect do início ao
 /// fim (criação, callbacks via ReceiveMessage e descarte), usando o padrão de
@@ -190,14 +194,8 @@ public sealed class SimConnectService : ISimSource
 
     private void OnRecvOpen(SimConnect sender, SIMCONNECT_RECV_OPEN data)
     {
-        _simulatorName = data.dwApplicationVersionMajor switch
-        {
-            12 => "Microsoft Flight Simulator 2024",
-            11 => "Microsoft Flight Simulator 2020",
-            _ => string.IsNullOrWhiteSpace(data.szApplicationName)
-                 ? "Microsoft Flight Simulator"
-                 : data.szApplicationName,
-        };
+        _simulatorName = SimulatorIdentity.Describe(
+            data.dwApplicationVersionMajor, data.szApplicationName);
         _state = SimConnectionState.Connected;
 
         // Unidades pedidas já convertidas pelo SimConnect (nativas são radianos!).

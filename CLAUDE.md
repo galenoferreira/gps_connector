@@ -1,8 +1,8 @@
 # 2G GPS Cliente for MSFS
 
-Conector Windows (WPF, .NET 10, x64) que lê posição do Microsoft Flight Simulator
-2020/2024 via SimConnect e transmite no protocolo XGPS (UDP broadcast, porta 49002)
-para EFBs — 2G Pilot, ForeFlight, SkyDemon etc.
+Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimConnect
+(MSFS 2020/2024 e Prepar3D v4+) e transmite no protocolo XGPS (UDP broadcast, porta
+49002) para EFBs. EFBs oficialmente suportados: **2G Pilot EFB e ForeFlight**.
 
 ## Estrutura
 
@@ -23,6 +23,11 @@ para EFBs — 2G Pilot, ForeFlight, SkyDemon etc.
 - Build local em macOS/Linux exige `EnableWindowsTargeting` (já no csproj): `dotnet build` compila,
   mas só roda no Windows.
 - Taxas padrão: 5 Hz para XGPS e XATT (decisão do produto; configurável na UI).
+- Prepar3D usa a MESMA API SimConnect, mesmas SimVars e mesmas convenções de sinal
+  invertidas do FSX — não há caminho de código separado, só o nome exibido muda
+  (`SimulatorIdentity.Describe`). Suporte ainda NÃO validado num P3D real.
+- Simuladores novos entram implementando `ISimSource`; o broadcaster e a UI não mudam.
+  Lógica pura (parsers, identificação) vai no `Core`, que é testável sem simulador.
 - **Entrega é UM único .exe** (`PublishSingleFile` no csproj, RID fixo `win-x64`).
   As DLLs do SimConnect NÃO podem entrar no bundle (mixed-mode C++/CLI não carrega
   da memória) — são recursos embutidos extraídos pelo `SimConnectRuntime`, junto

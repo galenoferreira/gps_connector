@@ -96,44 +96,83 @@ public partial class MainViewModel : ObservableObject
 
     private int _refreshTick;
     private string _detectedInstalls = "";
+    private string? _runningSimulator;
+    private DateTime? _searchingSince;
+
+    /// <summary>Depois disto, um simulador aberto que não conectou vira alerta.</summary>
+    private static readonly TimeSpan ConnectPatience = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Enquanto procura, distingue os três casos que exigem ações diferentes do
+    /// usuário: nenhum simulador aberto, simulador abrindo, e simulador aberto que
+    /// não aceita a conexão (o sintoma de incompatibilidade do SimConnect).
+    /// </summary>
+    private void UpdateSearchingStatus()
+    {
+        var error = _sim.LastError;
+        if (error is not null)
+        {
+            SimStatusText = "Falha ao inicializar o SimConnect";
+            SimDetail = error;
+            SimStatusBrush = Err;
+            return;
+        }
+
+        _searchingSince ??= DateTime.UtcNow;
+
+        if (_runningSimulator is not null)
+        {
+            var waiting = DateTime.UtcNow - _searchingSince.Value;
+            if (waiting > ConnectPatience)
+            {
+                SimStatusText = $"{_runningSimulator} não aceitou a conexão";
+                SimDetail = "O simulador está aberto, mas o SimConnect não respondeu. "
+                          + "Verifique se ele terminou de carregar; se persistir, "
+                          + "pode ser incompatibilidade da versão do SimConnect.";
+                SimStatusBrush = Err;
+            }
+            else
+            {
+                SimStatusText = $"Conectando ao {_runningSimulator}…";
+                SimDetail = "Simulador em execução — estabelecendo a conexão SimConnect.";
+                SimStatusBrush = Warn;
+            }
+            return;
+        }
+
+        SimStatusText = "Procurando simulador…";
+        SimDetail = _detectedInstalls.Length > 0
+            ? $"Instalado: {_detectedInstalls}. Abra o simulador para conectar."
+            : "Conecta automaticamente ao abrir o MSFS ou o Prepar3D.";
+        SimStatusBrush = Warn;
+    }
 
     private void Refresh()
     {
-        // Detecção de instalações é I/O leve; atualiza a cada ~10 s.
+        // Detecção de instalações e de processo é I/O leve; atualiza a cada ~10 s.
         if (_refreshTick++ % 40 == 0)
         {
             _detectedInstalls = string.Join(" e ",
-                MsfsInstallations.Detected().Select(i => i.DisplayName));
+                SimulatorInstallations.Detected().Select(i => i.DisplayName));
+            _runningSimulator = SimulatorInstallations.RunningSimulator();
         }
 
         var state = _sim.State;
         switch (state)
         {
             case SimConnectionState.Searching:
-                var error = _sim.LastError;
-                if (error is not null)
-                {
-                    SimStatusText = "Falha ao inicializar o SimConnect";
-                    SimDetail = error;
-                    SimStatusBrush = Err;
-                }
-                else
-                {
-                    SimStatusText = "Procurando simulador…";
-                    SimDetail = _detectedInstalls.Length > 0
-                        ? $"Instalado: {_detectedInstalls}. Abra o simulador para conectar."
-                        : "Conecta automaticamente quando o MSFS estiver aberto.";
-                    SimStatusBrush = Warn;
-                }
+                UpdateSearchingStatus();
                 break;
             case SimConnectionState.Connected:
+                _searchingSince = null;
                 SimStatusText = "Conectado — aguardando voo";
-                SimDetail = _sim.SimulatorName ?? "Microsoft Flight Simulator";
+                SimDetail = _sim.SimulatorName ?? "Simulador";
                 SimStatusBrush = Ok;
                 break;
             case SimConnectionState.Receiving:
+                _searchingSince = null;
                 SimStatusText = "Recebendo dados de voo";
-                SimDetail = _sim.SimulatorName ?? "Microsoft Flight Simulator";
+                SimDetail = _sim.SimulatorName ?? "Simulador";
                 SimStatusBrush = Ok;
                 break;
         }

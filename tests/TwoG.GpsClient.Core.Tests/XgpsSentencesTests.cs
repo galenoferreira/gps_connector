@@ -86,6 +86,31 @@ public class XgpsSentencesTests
     }
 }
 
+public class SimulatorIdentityTests
+{
+    [Theory]
+    // O MSFS se identifica pelo codinome interno; quem manda é a versão maior.
+    [InlineData(12u, "KittyHawk", "Microsoft Flight Simulator 2024")]
+    [InlineData(11u, "KittyHawk", "Microsoft Flight Simulator 2020")]
+    [InlineData(11u, "", "Microsoft Flight Simulator 2020")]
+    [InlineData(11u, null, "Microsoft Flight Simulator 2020")]
+    // O Prepar3D se identifica pelo nome, e ele tem precedência sobre a versão.
+    [InlineData(5u, "Lockheed Martin® Prepar3D® v5", "Prepar3D v5")]
+    [InlineData(6u, "Prepar3D", "Prepar3D v6")]
+    [InlineData(4u, "prepar3d", "Prepar3D v4")]
+    [InlineData(0u, "Prepar3D", "Prepar3D")]
+    // FSX não é suportado (32 bits), mas se aparecer, nomeie corretamente.
+    [InlineData(10u, "Microsoft Flight Simulator X", "Microsoft Flight Simulator X")]
+    // Desconhecido: nome útil passa; codinome sem valor para o usuário, não.
+    [InlineData(99u, "Algum Simulador Novo", "Algum Simulador Novo")]
+    [InlineData(99u, "KittyHawk", "Microsoft Flight Simulator")]
+    [InlineData(0u, "", "Microsoft Flight Simulator")]
+    public void Describe_NamesTheSimulator(uint versionMajor, string? appName, string expected)
+    {
+        Assert.Equal(expected, SimulatorIdentity.Describe(versionMajor, appName));
+    }
+}
+
 public class NetworkMathTests
 {
     [Theory]
