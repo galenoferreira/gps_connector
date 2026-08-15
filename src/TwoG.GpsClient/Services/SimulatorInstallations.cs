@@ -86,6 +86,7 @@ public static class SimulatorInstallations
         ("FlightSimulator2024", "Microsoft Flight Simulator 2024"),
         ("FlightSimulator", "Microsoft Flight Simulator 2020"),
         ("Prepar3D", "Prepar3D"),
+        ("X-Plane", "X-Plane"),
     ];
 
     /// <summary>

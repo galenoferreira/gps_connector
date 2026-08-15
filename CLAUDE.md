@@ -26,6 +26,12 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
 - Prepar3D usa a MESMA API SimConnect, mesmas SimVars e mesmas convenções de sinal
   invertidas do FSX — não há caminho de código separado, só o nome exibido muda
   (`SimulatorIdentity.Describe`). Suporte ainda NÃO validado num P3D real.
+- X-Plane é UDP puro (`XPlaneService` + `XPlaneProtocol`/`XPlaneFixAssembler` no Core):
+  beacon multicast BECN 239.255.1.1:49707 para descoberta, RREF na porta anunciada.
+  **Sem inversão de sinais** — theta/phi já são a convenção do XATT, ao contrário do
+  MSFS. A ordem do array `XPlaneFixAssembler.Datarefs` É o contrato de fio (o índice
+  vai no pacote e volta na resposta): nunca reordenar. Também NÃO validado num X-Plane real.
+- Todas as fontes rodam juntas via `CompositeSimSource`; quem responder primeiro vence.
 - Simuladores novos entram implementando `ISimSource`; o broadcaster e a UI não mudam.
   Lógica pura (parsers, identificação) vai no `Core`, que é testável sem simulador.
 - **Entrega é UM único .exe** (`PublishSingleFile` no csproj, RID fixo `win-x64`).

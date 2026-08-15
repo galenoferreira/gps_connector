@@ -23,7 +23,8 @@ public partial class App : Application
     /// <see cref="SimConnectRuntime.Ensure"/> ter extraído e registrado as DLLs.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static ISimSource CreateSimSource() => new SimConnectService();
+    private static ISimSource CreateSimSource() =>
+        new CompositeSimSource(new SimConnectService(), new XPlaneService());
 
     protected override void OnStartup(StartupEventArgs e)
     {

@@ -34,29 +34,50 @@ do Synthetic Vision.
 
 ## Simuladores suportados
 
-| Simulador | Situação |
-|---|---|
-| **MSFS 2024** (Microsoft Store e Steam) | ✅ Suportado |
-| **MSFS 2020** (Microsoft Store e Steam) | ✅ Suportado |
-| **Prepar3D v4 / v5 / v6** | 🧪 **Experimental** — implementado, ainda não validado com o simulador real |
-| FSX, Prepar3D v1–v3 | ❌ Fora de escopo (SimConnect só 32 bits) |
+| Simulador | Como conecta | Situação |
+|---|---|---|
+| **MSFS 2024** (Store e Steam) | SimConnect | ✅ Suportado |
+| **MSFS 2020** (Store e Steam) | SimConnect | ✅ Suportado |
+| **Prepar3D v4 / v5 / v6** | SimConnect | 🧪 **Experimental** — não validado com o simulador real |
+| **X-Plane 11 / 12** | UDP (beacon + datarefs) | 🧪 **Experimental** — não validado com o simulador real |
+| FSX, Prepar3D v1–v3 | — | ❌ Fora de escopo (SimConnect só 32 bits) |
 
-O Prepar3D usa a mesma API SimConnect do MSFS, com as mesmas variáveis e
-convenções de sinal, então o mesmo caminho de código atende aos dois. Se você
-testar, [conte como foi](https://github.com/galenoferreira/gps_connector/issues) —
-o app mostra na tela se o simulador foi detectado e se a conexão foi aceita.
+Não há nada a escolher: o app procura os três ao mesmo tempo e usa o que
+responder — inclusive um X-Plane rodando em **outra máquina da rede**, que ele
+descobre sozinho pelo beacon multicast.
 
-Suporte a X-Plane está avaliado no [estudo multi-simulador](docs/estudo-multi-simulador.md).
+Se você testar o Prepar3D ou o X-Plane,
+[conte como foi](https://github.com/galenoferreira/gps_connector/issues) — a tela
+mostra qual simulador foi detectado e se a conexão foi aceita. Detalhes técnicos e
+decisões no [estudo multi-simulador](docs/estudo-multi-simulador.md).
+
+<details>
+<summary>X-Plane: alternativa sem instalar nada</summary>
+
+O X-Plane já sabe transmitir XGPS/XATT sozinho: *Settings → Network → "iPhone,
+iPad and External Apps"*, marcando o broadcast para apps de mapa. Funciona sem
+este conector.
+
+O que você ganha usando o 2G GPS Cliente: o dispositivo aparece com o nome
+**"2G GPS"** no EFB em vez de **"1"** (o X-Plane se anuncia como `XGPS1`), não
+precisa achar a opção nos ajustes, e você pode enviar para um IP específico em
+outra sub-rede. O que você perde: o caminho nativo tem precisão um pouco melhor
+(~1,5 m contra o float32 do protocolo de datarefs), diferença irrelevante para um
+mapa móvel.
+
+</details>
 
 ## Como funciona
 
 ```
-MSFS 2020/2024 ──SimConnect──▶ 2G GPS Cliente ──UDP 49002 (XGPS/XATT)──▶ EFB (tablet/celular)
+MSFS · Prepar3D ──SimConnect──┐
+                              ├─▶ 2G GPS Cliente ──UDP 49002 (XGPS/XATT)──▶ EFB
+X-Plane ──────────UDP RREF────┘
 ```
 
-- **Conexão automática**: o app procura o simulador a cada 3 segundos — pode abrir
-  o simulador antes ou depois, tanto faz. Um único binário atende MSFS 2020, MSFS
-  2024 (Store e Steam) e Prepar3D.
+- **Conexão automática**: o app procura todos os simuladores ao mesmo tempo e usa
+  o que responder — pode abrir o simulador antes ou depois, tanto faz. Um único
+  binário atende MSFS 2020/2024, Prepar3D e X-Plane.
 - **Transmissão**: posição (`XGPS`) e atitude (`XATT`) por broadcast dirigido em
   todas as interfaces de rede ativas, mais unicast opcional para IPs específicos.
   Padrão de 5 Hz, ajustável na interface.
