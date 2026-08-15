@@ -108,8 +108,11 @@ dependências e sem instalador.
 
 - **Zero pré-requisitos**: o runtime .NET e o Visual C++ Redistributable viajam
   dentro do executável.
-- Não requer administrador nem regra de firewall (o app apenas **envia** UDP,
-  liberado por padrão no Windows).
+- Não requer administrador.
+- Na primeira execução o Windows pode pedir permissão de firewall, porque o app
+  escuta o anúncio do X-Plane na rede. **Só use X-Plane?** Permita. **Só usa MSFS
+  ou Prepar3D?** Pode negar sem prejuízo — o envio para o EFB é de saída e já é
+  liberado por padrão.
 - Rode de onde quiser: Desktop, Downloads, pendrive.
 - Detecta o MSFS sozinho, em tempo de execução. Se você mover o `.exe` de lugar,
   o "Iniciar junto com o MSFS" se reajusta na próxima abertura.
@@ -141,6 +144,7 @@ as seguintes são normais.
 | Tablet em sub-rede diferente | Informe o IP do tablet em **Configurações → IPs adicionais** (unicast) |
 | Posição congela no EFB | Simulador pausado ou no menu — normal; retoma sozinho no voo |
 | Recebe em um EFB mas não em outro | Porta 49002 ocupada por outro conector — feche outras pontes de GPS |
+| X-Plane não é detectado | O beacon dele é bloqueado pelo firewall: libere o app para redes privadas, ou use o broadcast nativo do X-Plane (acima) |
 | "Falha ao inicializar o SimConnect" | Consulte `%LOCALAPPDATA%\2G GPS Cliente\erro.log` e [abra uma issue](https://github.com/galenoferreira/gps_connector/issues) com a mensagem |
 
 ## Desenvolvimento

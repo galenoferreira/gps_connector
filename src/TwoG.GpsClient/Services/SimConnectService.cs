@@ -62,6 +62,8 @@ public sealed class SimConnectService : ISimSource
     private volatile GpsFix? _latestFix;
     private volatile string? _lastError;
 
+    public string Name => "SimConnect";
+
     public SimConnectionState State
     {
         get

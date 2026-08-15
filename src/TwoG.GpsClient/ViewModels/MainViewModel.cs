@@ -112,7 +112,7 @@ public partial class MainViewModel : ObservableObject
         var error = _sim.LastError;
         if (error is not null)
         {
-            SimStatusText = "Falha ao inicializar o SimConnect";
+            SimStatusText = "Falha ao inicializar";
             SimDetail = error;
             SimStatusBrush = Err;
             return;

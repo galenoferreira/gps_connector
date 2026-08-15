@@ -14,9 +14,12 @@ public enum SimConnectionState
     Receiving,
 }
 
-/// <summary>Fonte de dados de posição do simulador (SimConnect).</summary>
+/// <summary>Fonte de dados de posição de um simulador.</summary>
 public interface ISimSource : IDisposable
 {
+    /// <summary>Nome curto do transporte, para rotular erros ("SimConnect", "X-Plane").</summary>
+    string Name { get; }
+
     SimConnectionState State { get; }
 
     /// <summary>Nome/versão do simulador conectado (ex.: "Microsoft Flight Simulator 2024").</summary>

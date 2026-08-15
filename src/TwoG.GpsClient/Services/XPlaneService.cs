@@ -36,6 +36,8 @@ public sealed class XPlaneService : ISimSource
     private volatile GpsFix? _latestFix;
     private volatile string? _lastError;
 
+    public string Name => "X-Plane";
+
     public SimConnectionState State
     {
         get

@@ -44,6 +44,8 @@ public sealed class CompositeSimSource : ISimSource
         }
     }
 
+    public string Name => Active?.Name ?? "—";
+
     public SimConnectionState State => Active?.State ?? SimConnectionState.Searching;
 
     public string? SimulatorName => Active?.SimulatorName;
@@ -60,12 +62,14 @@ public sealed class CompositeSimSource : ISimSource
         {
             if (Active is not null)
                 return null;
-            foreach (var source in _sources)
-            {
-                if (source.LastError is { Length: > 0 } error)
-                    return error;
-            }
-            return null;
+
+            // Rotula por transporte: uma falha do X-Plane não pode parecer falha
+            // do SimConnect, e vice-versa.
+            var failures = _sources
+                .Where(s => s.LastError is { Length: > 0 })
+                .Select(s => $"{s.Name}: {s.LastError}")
+                .ToArray();
+            return failures.Length == 0 ? null : string.Join("  •  ", failures);
         }
     }
 
