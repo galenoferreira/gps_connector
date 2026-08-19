@@ -2,10 +2,10 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [main, PROD]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, PROD]
   workflow_dispatch:
 
 permissions:
