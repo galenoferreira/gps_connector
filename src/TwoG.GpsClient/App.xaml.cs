@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using TwoG.GpsClient.Configuration;
+using TwoG.GpsClient.Core;
 using TwoG.GpsClient.Services;
 using TwoG.GpsClient.ViewModels;
 
@@ -16,6 +17,7 @@ public partial class App : Application
     private EventWaitHandle? _showEvent;
     private ISimSource? _sim;
     private XgpsBroadcaster? _broadcaster;
+    private FlightPlanServer? _flightPlanServer;
 
     /// <summary>
     /// Isolado e sem inline de propósito: o JIT deste método é o primeiro ponto que
@@ -81,7 +83,9 @@ public partial class App : Application
 
         _sim = CreateSimSource();
         _broadcaster = new XgpsBroadcaster(_sim, settings);
-        var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings);
+        _flightPlanServer = new FlightPlanServer();
+        _flightPlanServer.Start(settings.FlightPlanPort);
+        var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings, _flightPlanServer);
 
         var window = new MainWindow { DataContext = viewModel };
         MainWindow = window;
@@ -160,6 +164,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _flightPlanServer?.Dispose();
         _broadcaster?.Dispose();
         _sim?.Dispose();
         _singleInstanceMutex?.Dispose();

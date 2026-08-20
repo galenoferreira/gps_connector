@@ -18,4 +18,7 @@ public interface IXgpsBroadcaster : IDisposable
 
     /// <summary>Aplica novas configurações (porta, taxas, nome do dispositivo, unicast).</summary>
     void UpdateSettings(AppSettings settings);
+
+    /// <summary>Envia uma sentença avulsa imediatamente (ex.: anúncio de plano de voo).</summary>
+    void SendNow(string sentence);
 }

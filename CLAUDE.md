@@ -32,6 +32,14 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
   MSFS. A ordem do array `XPlaneFixAssembler.Datarefs` É o contrato de fio (o índice
   vai no pacote e volta na resposta): nunca reordenar. Também NÃO validado num X-Plane real.
 - Todas as fontes rodam juntas via `CompositeSimSource`; quem responder primeiro vence.
+- Plano de voo (botão SYNC PV): `IFlightPlanSource` é capacidade OPCIONAL de uma fonte.
+  MSFS/P3D leem o `.PLN` (caminho via `RequestSystemState("FlightPlan")`, com fallback
+  em `PlnFileLocator` porque o MSFS 2024 devolve `".PLN"` — bug confirmado pela Asobo);
+  X-Plane lê o `.fms` mais recente, só local e só se o piloto salvou. Entrega ao EFB:
+  anúncio `2GFPL` na UDP 49002 + `FlightPlanServer` (TcpListener, HTTP mínimo) na 49003.
+  HttpListener NÃO serve aqui: escutar em todas as interfaces exigiria admin.
+- `FlightPlanServer` mora no `Core` de propósito — sem dependência de WPF, roda e é
+  testado por HTTP real no macOS.
 - Simuladores novos entram implementando `ISimSource`; o broadcaster e a UI não mudam.
   Lógica pura (parsers, identificação) vai no `Core`, que é testável sem simulador.
 - **Entrega é UM único .exe** (`PublishSingleFile` no csproj, RID fixo `win-x64`).

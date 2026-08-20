@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using TwoG.GpsClient.Core;
@@ -16,7 +17,7 @@ namespace TwoG.GpsClient.Services;
 /// não há endereço para o usuário configurar, e funciona também com o X-Plane
 /// rodando em outra máquina da rede.
 /// </summary>
-public sealed class XPlaneService : ISimSource
+public sealed class XPlaneService : ISimSource, IFlightPlanSource
 {
     /// <summary>Frequência pedida ao X-Plane; acima da nossa taxa de envio, para o dado nunca ficar velho.</summary>
     private const int SubscriptionHz = 10;
@@ -246,5 +247,83 @@ public sealed class XPlaneService : ISimSource
             var packet = XPlaneProtocol.BuildRrefRequest(frequencyHz, index, XPlaneFixAssembler.Datarefs[index]);
             socket.SendTo(packet, xplane);
         }
+    }
+
+    // ── Plano de voo ────────────────────────────────────────────────────
+
+    public IFlightPlanSource? FlightPlans => this;
+
+    /// <summary>
+    /// Onde o X-Plane guarda planos salvos. Não há como descobrir isso pela rede, por
+    /// isso o recurso só funciona com o simulador na mesma máquina.
+    /// </summary>
+    private static IEnumerable<string> FmsPlanFolders()
+    {
+        foreach (var root in new[]
+                 {
+                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                     @"C:\", @"D:\", @"E:\",
+                 })
+        {
+            if (string.IsNullOrEmpty(root))
+                continue;
+            foreach (var name in new[] { "X-Plane 12", "X-Plane 11" })
+                yield return Path.Combine(root, name, "Output", "FMS plans");
+        }
+    }
+
+    /// <summary>
+    /// O X-Plane não expõe a rota ativa por UDP nem por dataref e não salva o plano
+    /// sozinho — o piloto precisa exportá-lo. Lemos o .fms mais recente.
+    /// </summary>
+    public bool CanRead => _state != SimConnectionState.Searching;
+
+    public FlightPlanReadResult Read()
+    {
+        string? newest = null;
+        var newestWrite = DateTime.MinValue;
+
+        foreach (var folder in FmsPlanFolders())
+        {
+            try
+            {
+                if (!Directory.Exists(folder))
+                    continue;
+                foreach (var file in Directory.GetFiles(folder, "*.fms", SearchOption.TopDirectoryOnly))
+                {
+                    var written = File.GetLastWriteTimeUtc(file);
+                    if (written > newestWrite)
+                    {
+                        newest = file;
+                        newestWrite = written;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Pasta inacessível: tenta a próxima.
+            }
+        }
+
+        if (newest is null)
+            return FlightPlanReadResult.Fail(
+                "Nenhum plano encontrado. No X-Plane, salve a rota (Output/FMS plans) antes de sincronizar. "
+                + "Só funciona com o X-Plane nesta mesma máquina.");
+
+        string content;
+        try
+        {
+            content = File.ReadAllText(newest);
+        }
+        catch (Exception ex)
+        {
+            return FlightPlanReadResult.Fail($"Não foi possível ler {Path.GetFileName(newest)}: {ex.Message}");
+        }
+
+        var plan = FmsFlightPlanParser.Parse(content);
+        if (plan is null || !plan.IsUsable)
+            return FlightPlanReadResult.Fail($"Plano inválido ou vazio: {Path.GetFileName(newest)}");
+
+        return FlightPlanReadResult.Ok(plan);
     }
 }

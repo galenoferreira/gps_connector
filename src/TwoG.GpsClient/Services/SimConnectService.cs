@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.FlightSimulator.SimConnect;
 using TwoG.GpsClient.Core;
@@ -24,15 +25,15 @@ namespace TwoG.GpsClient.Services;
 /// para o menu principal — mas envia Pause_EX1=9, e a entrega de dados estanca,
 /// então o watchdog de frescor do broadcaster cobre o resto.
 /// </summary>
-public sealed class SimConnectService : ISimSource
+public sealed class SimConnectService : ISimSource, IFlightPlanSource
 {
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(3);
 
     private const string ClientName = "2G GPS Cliente";
 
     private enum DEFINITION { Position }
-    private enum REQUEST { Position }
-    private enum EVENT_ID { Sim, PauseEx1, Crashed, CrashReset }
+    private enum REQUEST { Position, FlightPlan }
+    private enum EVENT_ID { Sim, PauseEx1, Crashed, CrashReset, FlightPlanActivated, FlightPlanDeactivated }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct PositionStruct
@@ -61,6 +62,7 @@ public sealed class SimConnectService : ISimSource
     private volatile string? _simulatorName;
     private volatile GpsFix? _latestFix;
     private volatile string? _lastError;
+    private volatile string? _flightPlanPath;
 
     public string Name => "SimConnect";
 
@@ -157,6 +159,7 @@ public sealed class SimConnectService : ISimSource
             sim.OnRecvQuit += OnRecvQuit;
             sim.OnRecvEvent += OnRecvEvent;
             sim.OnRecvSimobjectData += OnRecvSimobjectData;
+            sim.OnRecvSystemState += OnRecvSystemState;
             _sim = sim;
             _lastError = null;
         }
@@ -189,6 +192,7 @@ public sealed class SimConnectService : ISimSource
         _paused = false;
         _crashed = false;
         _simulatorName = null;
+        _flightPlanPath = null;
         _state = SimConnectionState.Searching;
     }
 
@@ -220,6 +224,34 @@ public sealed class SimConnectService : ISimSource
         sender.SubscribeToSystemEvent(EVENT_ID.PauseEx1, "Pause_EX1");
         sender.SubscribeToSystemEvent(EVENT_ID.Crashed, "Crashed");
         sender.SubscribeToSystemEvent(EVENT_ID.CrashReset, "CrashReset");
+
+        // Caminho do .PLN ativo. Chega de forma assincrona em OnRecvSystemState e fica
+        // em cache, porque o botao da UI nao pode tocar no SimConnect (afinidade de thread).
+        sender.SubscribeToSystemEvent(EVENT_ID.FlightPlanActivated, "FlightPlanActivated");
+        sender.SubscribeToSystemEvent(EVENT_ID.FlightPlanDeactivated, "FlightPlanDeactivated");
+        RequestFlightPlanPath(sender);
+    }
+
+    private static void RequestFlightPlanPath(SimConnect sender)
+    {
+        try
+        {
+            sender.RequestSystemState(REQUEST.FlightPlan, "FlightPlan");
+        }
+        catch (COMException)
+        {
+            // Sem o caminho, o locator por caminho conhecido cobre.
+        }
+    }
+
+    private void OnRecvSystemState(SimConnect sender, SIMCONNECT_RECV_SYSTEM_STATE data)
+    {
+        if ((REQUEST)data.dwRequestID != REQUEST.FlightPlan)
+            return;
+
+        // O MSFS 2024 devolve "" ou ".PLN" enquanto o voo nao esta carregado (bug
+        // confirmado pela Asobo); nesses casos preserva o cache e deixa o fallback agir.
+        _flightPlanPath = PlnFileLocator.IsUsablePath(data.szString) ? data.szString.Trim() : null;
     }
 
     private void OnRecvQuit(SimConnect sender, SIMCONNECT_RECV data) => TearDown();
@@ -243,6 +275,12 @@ public sealed class SimConnectService : ISimSource
                 break;
             case EVENT_ID.CrashReset:
                 _crashed = false;
+                break;
+            case EVENT_ID.FlightPlanActivated:
+                RequestFlightPlanPath(sender);
+                break;
+            case EVENT_ID.FlightPlanDeactivated:
+                _flightPlanPath = null;
                 break;
         }
     }
@@ -276,5 +314,43 @@ public sealed class SimConnectService : ISimSource
             RollDegRight: -p.BankDeg,
             OnGround: p.OnGround != 0);
         _state = SimConnectionState.Receiving;
+    }
+
+    // ── Plano de voo ────────────────────────────────────────────────────
+
+    public IFlightPlanSource? FlightPlans => this;
+
+    /// <summary>Só oferece o plano com o simulador conectado.</summary>
+    public bool CanRead => _state != SimConnectionState.Searching;
+
+    public FlightPlanReadResult Read()
+    {
+        // Preferência para o caminho que o próprio simulador informou; senão, o
+        // local padrão do voo personalizado.
+        var path = _flightPlanPath;
+        if (!PlnFileLocator.IsUsablePath(path))
+            path = PlnFileLocator.MostRecentExisting();
+
+        if (path is null)
+            return FlightPlanReadResult.Fail(
+                "Nenhum plano de voo encontrado. Crie a rota no simulador antes de sincronizar.");
+
+        string xml;
+        try
+        {
+            xml = File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            return FlightPlanReadResult.Fail($"Não foi possível ler {Path.GetFileName(path)}: {ex.Message}");
+        }
+
+        var plan = PlnFlightPlanParser.Parse(xml);
+        if (plan is null)
+            return FlightPlanReadResult.Fail($"Arquivo de plano em formato inesperado: {Path.GetFileName(path)}");
+        if (!plan.IsUsable)
+            return FlightPlanReadResult.Fail("O plano de voo tem menos de dois waypoints.");
+
+        return FlightPlanReadResult.Ok(plan);
     }
 }

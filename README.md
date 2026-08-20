@@ -86,8 +86,49 @@ X-Plane ──────────UDP RREF────┘
 - **Iniciar junto com o MSFS**: registra-se no `EXE.xml` do simulador com merge
   seguro e backup, sem tocar nas entradas de outros add-ons. Se um update do MSFS
   apagar o registro, ele se refaz na execução seguinte.
+- **SYNC PV to 2G Pilot**: um clique lê o plano de voo ativo no simulador e o
+  entrega ao EFB. Ver [Sincronizar plano de voo](#sincronizar-plano-de-voo).
 - **Bandeja do sistema**: fechar a janela mantém a transmissão ativa em segundo
   plano; para encerrar de fato, use **Sair** no menu da bandeja.
+
+## Sincronizar plano de voo
+
+Com o simulador conectado, o botão **SYNC PV to 2G Pilot** lê a rota ativa e a
+disponibiliza ao EFB — sem redigitar waypoint por waypoint.
+
+| Simulador | De onde vem a rota | Observação |
+|---|---|---|
+| MSFS 2020/2024 | `.PLN` do voo em curso, caminho informado pelo próprio SimConnect | Automático |
+| Prepar3D | Mesmo formato `.PLN` | Automático |
+| X-Plane | `.fms` mais recente em `Output/FMS plans` | **Salve a rota no X-Plane antes**, e só funciona com ele nesta mesma máquina |
+
+### Como o EFB recebe
+
+O plano não cabe num datagrama UDP e UDP não garante entrega, então o conector
+**anuncia** por UDP e **serve** por HTTP:
+
+1. O conector publica o plano em `http://<ip-do-pc>:49003/flightplan`
+2. Envia no canal UDP 49002, que o EFB já escuta:
+   `2GFPL<nome-do-dispositivo>,<versão>,<url>`
+3. O EFB faz `GET` na URL e recebe:
+
+```json
+{
+  "schemaVersion": 1,
+  "source": "MSFS 2024",
+  "generatedUtc": "2026-08-20T18:40:00Z",
+  "departure": "SBSP",
+  "destination": "SBRJ",
+  "cruiseAltitudeFt": 12000,
+  "waypoints": [
+    { "id": "SBSP", "type": "Airport", "lat": -23.626667, "lon": -46.656111, "altFt": 2630 }
+  ]
+}
+```
+
+`type` assume `Airport`, `Ndb`, `Vor`, `Intersection`, `User` ou `Unknown`. `altFt`
+é omitido quando o plano não define altitude para o waypoint. Suba `schemaVersion`
+a cada mudança incompatível.
 
 ## Download
 
@@ -110,9 +151,9 @@ dependências e sem instalador.
   dentro do executável.
 - Não requer administrador.
 - Na primeira execução o Windows pode pedir permissão de firewall, porque o app
-  escuta o anúncio do X-Plane na rede. **Só use X-Plane?** Permita. **Só usa MSFS
-  ou Prepar3D?** Pode negar sem prejuízo — o envio para o EFB é de saída e já é
-  liberado por padrão.
+  escuta o anúncio do X-Plane na rede e serve o plano de voo na porta 49003.
+  Permitir é necessário para **detectar o X-Plane** e para o **SYNC PV**; o envio
+  de posição ao EFB é de saída e funciona mesmo se você negar.
 - Rode de onde quiser: Desktop, Downloads, pendrive.
 - Detecta o MSFS sozinho, em tempo de execução. Se você mover o `.exe` de lugar,
   o "Iniciar junto com o MSFS" se reajusta na próxima abertura.
@@ -145,6 +186,8 @@ as seguintes são normais.
 | Posição congela no EFB | Simulador pausado ou no menu — normal; retoma sozinho no voo |
 | Recebe em um EFB mas não em outro | Porta 49002 ocupada por outro conector — feche outras pontes de GPS |
 | X-Plane não é detectado | O beacon dele é bloqueado pelo firewall: libere o app para redes privadas, ou use o broadcast nativo do X-Plane (acima) |
+| SYNC PV não acha o plano | No MSFS/P3D, crie a rota antes de iniciar o voo; no X-Plane, salve-a em `Output/FMS plans` |
+| EFB não busca o plano anunciado | Porta TCP 49003 bloqueada pelo firewall — libere o app para redes privadas |
 | "Falha ao inicializar o SimConnect" | Consulte `%LOCALAPPDATA%\2G GPS Cliente\erro.log` e [abra uma issue](https://github.com/galenoferreira/gps_connector/issues) com a mensagem |
 
 ## Desenvolvimento

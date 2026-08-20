@@ -26,6 +26,16 @@ public static class XgpsSentences
         string.Create(CultureInfo.InvariantCulture,
             $"XATT{deviceName},{Normalize360(fix.HeadingTrueDeg):0.#},{fix.PitchDegUp:0.#},{fix.RollDegRight:0.#},,,,,,,,,");
 
+    /// <summary>
+    /// Anúncio de plano de voo para o 2G Pilot EFB, enviado no mesmo canal UDP 49002
+    /// que ele já escuta. Só carrega a URL — o plano em si vai por HTTP, porque uma
+    /// rota real não cabe num datagrama e UDP não garante entrega.
+    ///
+    ///   2GFPL&lt;nome&gt;,&lt;versão do schema&gt;,&lt;url&gt;
+    /// </summary>
+    public static string FormatFlightPlanAnnounce(string deviceName, int schemaVersion, string url) =>
+        string.Create(CultureInfo.InvariantCulture, $"2GFPL{deviceName},{schemaVersion},{url}");
+
     /// <summary>Normaliza um ângulo para o intervalo [0, 360).</summary>
     public static double Normalize360(double deg)
     {

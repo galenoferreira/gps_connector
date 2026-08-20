@@ -34,6 +34,11 @@ public interface ISimSource : IDisposable
     /// </summary>
     string? LastError { get; }
 
+    /// <summary>
+    /// Leitura de plano de voo, quando a fonte souber fazer. Null quando não suporta.
+    /// </summary>
+    IFlightPlanSource? FlightPlans { get; }
+
     void Start();
     void Stop();
 }

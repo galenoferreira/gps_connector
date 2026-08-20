@@ -146,6 +146,12 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
         SendToAll(XgpsSentences.FormatXatt(_deviceName, fix));
     }
 
+    /// <summary>
+    /// Envia uma sentença avulsa agora, fora dos timers periódicos. Usado pelo
+    /// anúncio de plano de voo, que é disparado por clique e não por frequência.
+    /// </summary>
+    public void SendNow(string sentence) => SendToAll(sentence);
+
     private GpsFix? FreshFixOrNull()
     {
         var fix = _source.LatestFix;

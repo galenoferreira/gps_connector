@@ -20,16 +20,19 @@ public partial class MainViewModel : ObservableObject
     private readonly IXgpsBroadcaster _broadcaster;
     private readonly SettingsService _settingsService;
     private readonly AppSettings _settings;
+    private readonly FlightPlanServer _flightPlanServer;
     private readonly DispatcherTimer _uiTimer;
     private readonly DispatcherTimer _feedbackTimer;
 
     public MainViewModel(ISimSource sim, IXgpsBroadcaster broadcaster,
-                         SettingsService settingsService, AppSettings settings)
+                         SettingsService settingsService, AppSettings settings,
+                         FlightPlanServer flightPlanServer)
     {
         _sim = sim;
         _broadcaster = broadcaster;
         _settingsService = settingsService;
         _settings = settings;
+        _flightPlanServer = flightPlanServer;
 
         LoadSettingsIntoInputs();
 
@@ -76,6 +79,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _startWithSimInput;
     [ObservableProperty] private bool _startMinimizedInput;
     [ObservableProperty] private bool _closeToTrayInput;
+    [ObservableProperty] private bool _canSyncFlightPlan;
+    [ObservableProperty] private string _flightPlanFeedback = "";
+    [ObservableProperty] private Brush _flightPlanFeedbackBrush = Dim;
     [ObservableProperty] private string _settingsFeedback = "";
     [ObservableProperty] private Brush _settingsFeedbackBrush = Dim;
 
@@ -198,6 +204,8 @@ public partial class MainViewModel : ObservableObject
             ? ""
             : $"{_broadcaster.PacketsSent.ToString("N0", CultureInfo.CurrentCulture)} pacotes";
 
+        CanSyncFlightPlan = _sim.FlightPlans is { CanRead: true };
+
         var fix = _sim.LatestFix;
         if (fix is not null)
         {
@@ -229,6 +237,86 @@ public partial class MainViewModel : ObservableObject
         hz == Math.Floor(hz)
             ? $"{(int)hz} Hz"
             : $"{hz.ToString("0.#", CultureInfo.CurrentCulture)} Hz";
+
+    /// <summary>
+    /// Lê o plano ativo do simulador, publica no servidor local e avisa o EFB pela
+    /// sentença 2GFPL no canal UDP que ele já escuta.
+    /// </summary>
+    [RelayCommand]
+    private void SyncFlightPlan()
+    {
+        var source = _sim.FlightPlans;
+        if (source is null || !source.CanRead)
+        {
+            ShowFlightPlanFeedback("Nenhum simulador conectado.", isError: true);
+            return;
+        }
+
+        FlightPlanReadResult result;
+        try
+        {
+            result = source.Read();
+        }
+        catch (Exception ex)
+        {
+            ShowFlightPlanFeedback($"Falha ao ler o plano: {ex.Message}", isError: true);
+            return;
+        }
+
+        if (result.Plan is null)
+        {
+            ShowFlightPlanFeedback(result.Error ?? "Não foi possível ler o plano.", isError: true);
+            return;
+        }
+
+        if (!_flightPlanServer.IsRunning)
+        {
+            ShowFlightPlanFeedback(
+                _flightPlanServer.LastError ?? "Servidor de plano de voo indisponível.", isError: true);
+            return;
+        }
+
+        var json = FlightPlanJson.Serialize(
+            result.Plan, _sim.SimulatorName ?? _sim.Name, DateTime.UtcNow);
+        _flightPlanServer.Publish(json);
+
+        // O EFB descobre o IP do PC pela própria origem do datagrama, mas a URL
+        // precisa ser absoluta para ele buscar — usamos o IP local da rota de saída.
+        var url = $"http://{LocalAddressForEfb()}:{_flightPlanServer.Port}{FlightPlanServer.Path}";
+        _broadcaster.SendNow(XgpsSentences.FormatFlightPlanAnnounce(
+            _settings.DeviceName, FlightPlanJson.SchemaVersion, url));
+
+        ShowFlightPlanFeedback($"Plano enviado — {result.Plan.Summary}", isError: false);
+    }
+
+    /// <summary>
+    /// IP desta máquina na rede local. Descoberto abrindo um socket UDP para um
+    /// destino externo: não envia nada, só faz o Windows escolher a interface de saída.
+    /// </summary>
+    private static string LocalAddressForEfb()
+    {
+        try
+        {
+            using var probe = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Dgram,
+                System.Net.Sockets.ProtocolType.Udp);
+            probe.Connect("8.8.8.8", 65530);
+            if (probe.LocalEndPoint is System.Net.IPEndPoint endpoint)
+                return endpoint.Address.ToString();
+        }
+        catch (Exception)
+        {
+            // Sem rota externa: o EFB ainda pode tentar pelo hostname.
+        }
+        return System.Net.Dns.GetHostName();
+    }
+
+    private void ShowFlightPlanFeedback(string message, bool isError)
+    {
+        FlightPlanFeedback = message;
+        FlightPlanFeedbackBrush = isError ? Err : Ok;
+    }
 
     [RelayCommand]
     private void ApplySettings()

@@ -21,6 +21,9 @@ public sealed class AppSettings
     /// </summary>
     public string UnicastTargets { get; set; } = "";
 
+    /// <summary>Porta TCP em que o plano de voo fica disponível para o EFB buscar.</summary>
+    public int FlightPlanPort { get; set; } = 49003;
+
     /// <summary>Registrar no EXE.xml do MSFS para iniciar junto com o simulador.</summary>
     public bool StartWithSim { get; set; } = true;
 

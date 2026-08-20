@@ -52,6 +52,9 @@ public sealed class CompositeSimSource : ISimSource
 
     public GpsFix? LatestFix => Active?.LatestFix;
 
+    /// <summary>Plano de voo vem sempre da fonte ativa — nunca de um simulador fechado.</summary>
+    public IFlightPlanSource? FlightPlans => Active?.FlightPlans;
+
     /// <summary>
     /// Só reporta erro quando nenhuma fonte conseguiu conectar — do contrário, uma
     /// falha do SimConnect apareceria na tela mesmo com o X-Plane funcionando.
