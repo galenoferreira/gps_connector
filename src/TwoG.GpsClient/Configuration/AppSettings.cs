@@ -10,10 +10,10 @@ public sealed class AppSettings
     public int Port { get; set; } = 49002;
 
     /// <summary>Frequência de envio da sentença de posição XGPS, em Hz.</summary>
-    public double XgpsHz { get; set; } = 5.0;
+    public double XgpsHz { get; set; } = 2.0;
 
     /// <summary>Frequência de envio da sentença de atitude XATT, em Hz.</summary>
-    public double XattHz { get; set; } = 5.0;
+    public double XattHz { get; set; } = 2.0;
 
     /// <summary>
     /// IPs adicionais para envio unicast (além do broadcast), separados por vírgula.

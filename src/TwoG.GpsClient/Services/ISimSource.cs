@@ -29,6 +29,12 @@ public interface ISimSource : IDisposable
     GpsFix? LatestFix { get; }
 
     /// <summary>
+    /// Amostras descartadas por trazerem NaN/Infinity. Diagnóstico: se sobe
+    /// enquanto o EFB congela, o simulador está mandando lixo — não é a rede.
+    /// </summary>
+    long NonFiniteSamples { get; }
+
+    /// <summary>
     /// Falha persistente que impede a conexão (ex.: DLLs do SimConnect indisponíveis),
     /// ou null quando o único motivo de não estar conectado é o simulador estar fechado.
     /// </summary>

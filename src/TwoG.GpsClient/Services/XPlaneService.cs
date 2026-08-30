@@ -57,6 +57,8 @@ public sealed class XPlaneService : ISimSource
 
     public GpsFix? LatestFix => _latestFix;
 
+    public long NonFiniteSamples => _assembler.NonFiniteRejections;
+
     public string? LastError => _lastError;
 
     public void Start()

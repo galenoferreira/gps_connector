@@ -44,6 +44,8 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
 
     private long _packetsSent;
     private long _lastSendTicks;
+    private long _sendFailures;
+    private volatile string? _lastSendError;
 
     public XgpsBroadcaster(ISimSource source, AppSettings settings)
     {
@@ -67,6 +69,17 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
     }
 
     public long PacketsSent => Interlocked.Read(ref _packetsSent);
+
+    public long SendFailures => Interlocked.Read(ref _sendFailures);
+
+    public string? LastSendError => _lastSendError;
+
+    /// <summary>
+    /// Instantâneo dos destinos correntes. Força o recálculo quando ainda não há
+    /// nenhum, para a UI não mostrar lista vazia antes do primeiro envio.
+    /// </summary>
+    public IReadOnlyList<string> Destinations =>
+        CurrentEndpoints().Select(e => e.ToString()).ToArray();
 
     public DateTime? LastSendUtc
     {
@@ -151,7 +164,9 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
         var fix = _source.LatestFix;
         if (fix is null || DateTime.UtcNow - fix.Utc >= FixFreshness)
             return null;
-        return fix;
+        // Última barreira antes do fio: um campo não-finito viraria o texto "NaN"
+        // dentro da sentença, que o EFB descarta sem avisar.
+        return fix.IsFinite ? fix : null;
     }
 
     private void SendToAll(string sentence)
@@ -168,9 +183,13 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
                 Interlocked.Increment(ref _packetsSent);
                 Interlocked.Exchange(ref _lastSendTicks, DateTime.UtcNow.Ticks);
             }
-            catch (SocketException)
+            catch (SocketException ex)
             {
                 // Interface pode ter caído entre o refresh e o envio; próximo refresh corrige.
+                // Registrado para o painel de diagnóstico: falha silenciosa aqui era
+                // indistinguível de "enviado e a rede engoliu".
+                Interlocked.Increment(ref _sendFailures);
+                _lastSendError = $"{endpoint}: {ex.SocketErrorCode} ({ex.Message})";
             }
             catch (ObjectDisposedException)
             {
