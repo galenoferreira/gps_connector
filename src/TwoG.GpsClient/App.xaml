@@ -4,6 +4,8 @@
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
 
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
         <!-- ══ Paleta ══ -->
         <Color x:Key="BgColor">#0E1320</Color>
         <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}" />

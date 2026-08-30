@@ -64,6 +64,8 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
     private volatile string? _lastError;
     private volatile string? _flightPlanPath;
 
+    private long _nonFiniteSamples;
+
     public string Name => "SimConnect";
 
     public SimConnectionState State
@@ -85,6 +87,8 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
     public string? SimulatorName => _simulatorName;
 
     public GpsFix? LatestFix => _latestFix;
+
+    public long NonFiniteSamples => Interlocked.Read(ref _nonFiniteSamples);
 
     public string? LastError => SimConnectRuntime.Error ?? _lastError;
 
@@ -300,7 +304,7 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
         if (p.LatitudeDeg is < -90 or > 90 || p.LongitudeDeg is < -180 or > 180)
             return;
 
-        _latestFix = new GpsFix(
+        var fix = new GpsFix(
             Utc: DateTime.UtcNow,
             LatitudeDeg: p.LatitudeDeg,
             LongitudeDeg: p.LongitudeDeg,
@@ -313,6 +317,17 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
             PitchDegUp: -p.PitchDeg,
             RollDegRight: -p.BankDeg,
             OnGround: p.OnGround != 0);
+
+        // As guardas de faixa acima não pegam NaN/Infinity (comparação com NaN é
+        // sempre falsa) e basta um campo não-finito para o EFB descartar a
+        // sentença inteira, congelando a aeronave na última posição válida.
+        if (!fix.IsFinite)
+        {
+            Interlocked.Increment(ref _nonFiniteSamples);
+            return;
+        }
+
+        _latestFix = fix;
         _state = SimConnectionState.Receiving;
     }
 

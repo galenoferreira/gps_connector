@@ -80,7 +80,7 @@ X-Plane ──────────UDP RREF────┘
   binário atende MSFS 2020/2024, Prepar3D e X-Plane.
 - **Transmissão**: posição (`XGPS`) e atitude (`XATT`) por broadcast dirigido em
   todas as interfaces de rede ativas, mais unicast opcional para IPs específicos.
-  Padrão de 5 Hz, ajustável na interface.
+  Padrão de 2 Hz, ajustável na interface.
 - **Pausa inteligente**: com o simulador pausado ou no menu, a transmissão para e
   retoma sozinha quando o voo volta — o EFB não fica com a aeronave congelada.
 - **Iniciar junto com o MSFS**: registra-se no `EXE.xml` do simulador com merge
@@ -179,11 +179,24 @@ as seguintes são normais.
 
 ## Solução de problemas
 
+Abra o painel **Diagnóstico** na janela do app antes de mexer em firewall ou
+roteador. Ele mostra três coisas que respondem quase toda dúvida de rede:
+
+- **Destinos dos pacotes** — os endereços para onde o app está de fato enviando.
+- **Interfaces de rede deste PC** — o IP e a sub-rede de cada adaptador ativo.
+  Compare com o IP do tablet (*Ajustes → Wi-Fi → ⓘ*): sub-redes diferentes
+  significam que o broadcast nunca teve chance de chegar.
+- **Contadores** — `enviados`, `falhas` (erros de socket, ou seja, o pacote nem
+  saiu da máquina) e `amostras inválidas` (o simulador mandou NaN/Infinity e o
+  dado foi descartado antes de virar sentença).
+
 | Sintoma | Causa provável |
 |---|---|
 | EFB não recebe posição | Tablet em outra rede/sub-rede Wi-Fi, ou o roteador/AP está com "isolamento de clientes" (AP/client isolation) ligado |
 | Tablet em sub-rede diferente | Informe o IP do tablet em **Configurações → IPs adicionais** (unicast) |
 | Posição congela no EFB | Simulador pausado ou no menu — normal; retoma sozinho no voo |
+| Posição congela mas o contador de pacotes sobe | O pacote sai e some no caminho: veja `falhas` no Diagnóstico e confirme a sub-rede; muitos APs descartam broadcast para clientes Wi-Fi em economia de energia — a saída é o unicast para o IP do tablet |
+| `amostras inválidas` subindo no Diagnóstico | O simulador está entregando valores não-finitos (respawn, transição de mundo). O app descarta e a transmissão pausa até o dado voltar ao normal |
 | Recebe em um EFB mas não em outro | Porta 49002 ocupada por outro conector — feche outras pontes de GPS |
 | X-Plane não é detectado | O beacon dele é bloqueado pelo firewall: libere o app para redes privadas, ou use o broadcast nativo do X-Plane (acima) |
 | SYNC PV não acha o plano | No MSFS/P3D, crie a rota antes de iniciar o voo; no X-Plane, salve-a em `Output/FMS plans` |
@@ -256,7 +269,7 @@ finais do `XATT` completam os 13 campos que alguns EFBs esperam; o ForeFlight
 ignora os extras.
 
 > A especificação da ForeFlight recomenda posição a 1 Hz e atitude a 4–10 Hz.
-> O padrão deste produto é 5 Hz para ambas, ajustável na interface.
+> O padrão deste produto é 2 Hz para ambas, ajustável na interface.
 
 ---
 

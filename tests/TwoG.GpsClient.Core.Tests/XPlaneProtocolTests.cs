@@ -217,6 +217,59 @@ public class XPlaneFixAssemblerTests
         Assert.True(Filled(paused: 1).IsPaused);
     }
 
+    [Theory]
+    [InlineData(0)]   // latitude
+    [InlineData(1)]   // longitude
+    [InlineData(2)]   // elevação
+    [InlineData(3)]   // velocidade de solo
+    [InlineData(4)]   // curso
+    [InlineData(5)]   // proa
+    [InlineData(6)]   // arfagem
+    [InlineData(7)]   // rolagem
+    public void TryBuild_RejectsNonFiniteValues(int index)
+    {
+        var a = Filled();
+        a.Set(index, float.NaN);
+        Assert.Null(a.TryBuild(DateTime.UtcNow));
+
+        var b = Filled();
+        b.Set(index, float.PositiveInfinity);
+        Assert.Null(b.TryBuild(DateTime.UtcNow));
+    }
+
+    [Fact]
+    public void NonFiniteRejections_CountsDiscardsAndResetsWithTheAssembler()
+    {
+        var a = Filled();
+        Assert.Equal(0, a.NonFiniteRejections);
+
+        a.Set(4, float.NaN);   // curso
+        Assert.Null(a.TryBuild(DateTime.UtcNow));
+        Assert.Null(a.TryBuild(DateTime.UtcNow));
+        Assert.Equal(2, a.NonFiniteRejections);
+
+        a.Set(4, 231.245f);
+        Assert.NotNull(a.TryBuild(DateTime.UtcNow));
+        Assert.Equal(2, a.NonFiniteRejections);   // um build bom não zera o histórico
+
+        a.Reset();
+        Assert.Equal(0, a.NonFiniteRejections);
+    }
+
+    /// <summary>Descarte por faixa/pausa não é "valor inválido" e não entra na conta.</summary>
+    [Fact]
+    public void NonFiniteRejections_IgnoresRangeAndPauseDiscards()
+    {
+        var paused = Filled(paused: 1);
+        Assert.Null(paused.TryBuild(DateTime.UtcNow));
+        Assert.Equal(0, paused.NonFiniteRejections);
+
+        var bogus = Filled();
+        bogus.Set(0, 91f);
+        Assert.Null(bogus.TryBuild(DateTime.UtcNow));
+        Assert.Equal(0, bogus.NonFiniteRejections);
+    }
+
     [Fact]
     public void TryBuild_RejectsNullIslandAndOutOfRange()
     {

@@ -70,6 +70,13 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _rollText = "—";
     [ObservableProperty] private double _positionOpacity = 0.35;
 
+    // ── Diagnóstico ─────────────────────────────────────────────────────
+    [ObservableProperty] private string _diagDestinations = "—";
+    [ObservableProperty] private string _diagInterfaces = "—";
+    [ObservableProperty] private string _diagCounters = "—";
+    [ObservableProperty] private string _diagLastError = "";
+    [ObservableProperty] private bool _hasDiagError;
+
     // ── Configurações (campos de edição) ────────────────────────────────
     [ObservableProperty] private string _deviceNameInput = "";
     [ObservableProperty] private string _portInput = "";
@@ -206,6 +213,8 @@ public partial class MainViewModel : ObservableObject
 
         CanSyncFlightPlan = _sim.FlightPlans is { CanRead: true };
 
+        UpdateDiagnostics();
+
         var fix = _sim.LatestFix;
         if (fix is not null)
         {
@@ -224,6 +233,35 @@ public partial class MainViewModel : ObservableObject
             LatText = LonText = AltText = GsText = TrkText = HdgText = PitchText = RollText = "—";
             PositionOpacity = 0.35;
         }
+    }
+
+    /// <summary>
+    /// Alimenta o painel de diagnóstico. Enumerar interfaces é I/O, então só
+    /// acontece no mesmo tique lento (~10 s) da detecção de simuladores; os
+    /// contadores e os destinos são leituras baratas e vão a cada tique.
+    /// </summary>
+    private void UpdateDiagnostics()
+    {
+        if (_refreshTick % 40 == 1 || DiagInterfaces == "—")
+        {
+            var nics = NetworkDiagnostics.ActiveIPv4Interfaces();
+            DiagInterfaces = nics.Count == 0 ? "nenhuma interface IPv4 ativa" : string.Join("\n", nics);
+        }
+
+        var destinations = _broadcaster.Destinations;
+        DiagDestinations = destinations.Count == 0
+            ? "nenhum destino calculado"
+            : string.Join("\n", destinations);
+
+        var culture = CultureInfo.CurrentCulture;
+        DiagCounters = string.Join("  •  ",
+            $"enviados {_broadcaster.PacketsSent.ToString("N0", culture)}",
+            $"falhas {_broadcaster.SendFailures.ToString("N0", culture)}",
+            $"amostras inválidas {_sim.NonFiniteSamples.ToString("N0", culture)}");
+
+        // Um erro de envio é a única prova local de que o pacote nem saiu da máquina.
+        DiagLastError = _broadcaster.LastSendError ?? "";
+        HasDiagError = DiagLastError.Length > 0;
     }
 
     private static int NormalizeDeg(double deg)

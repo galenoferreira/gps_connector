@@ -55,6 +55,9 @@ public sealed class CompositeSimSource : ISimSource
     /// <summary>Plano de voo vem sempre da fonte ativa — nunca de um simulador fechado.</summary>
     public IFlightPlanSource? FlightPlans => Active?.FlightPlans;
 
+    /// <summary>Soma de todas as fontes: na prática só uma delas está recebendo.</summary>
+    public long NonFiniteSamples => _sources.Sum(s => s.NonFiniteSamples);
+
     /// <summary>
     /// Só reporta erro quando nenhuma fonte conseguiu conectar — do contrário, uma
     /// falha do SimConnect apareceria na tela mesmo com o X-Plane funcionando.

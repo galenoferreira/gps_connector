@@ -51,13 +51,24 @@ public sealed class XPlaneFixAssembler
 
     private readonly float?[] _values = new float?[Datarefs.Length];
 
+    /// <summary>
+    /// Quantas amostras completas foram descartadas por conter NaN/Infinity.
+    /// Diagnóstico: se isto sobe enquanto o EFB congela, a origem é o simulador
+    /// mandando lixo, não a rede.
+    /// </summary>
+    public long NonFiniteRejections { get; private set; }
+
     public void Set(int index, float value)
     {
         if ((uint)index < (uint)_values.Length)
             _values[index] = value;
     }
 
-    public void Reset() => Array.Clear(_values);
+    public void Reset()
+    {
+        Array.Clear(_values);
+        NonFiniteRejections = 0;
+    }
 
     public bool IsPaused => _values[Paused] is > 0.5f;
 
@@ -85,7 +96,7 @@ public sealed class XPlaneFixAssembler
         if (latitude is < -90 or > 90 || longitude is < -180 or > 180)
             return null;
 
-        return new GpsFix(
+        var fix = new GpsFix(
             Utc: utc,
             LatitudeDeg: latitude,
             LongitudeDeg: longitude,
@@ -96,5 +107,13 @@ public sealed class XPlaneFixAssembler
             PitchDegUp: _values[Pitch]!.Value,
             RollDegRight: _values[Roll]!.Value,
             OnGround: _values[OnGround] is > 0.5f);
+
+        // As guardas de faixa acima não pegam NaN (comparação com NaN é sempre
+        // falsa), e um único campo não-finito inutiliza a sentença inteira.
+        if (fix.IsFinite)
+            return fix;
+
+        NonFiniteRejections++;
+        return null;
     }
 }
