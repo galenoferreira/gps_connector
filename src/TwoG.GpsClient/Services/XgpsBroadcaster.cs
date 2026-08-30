@@ -18,6 +18,12 @@ namespace TwoG.GpsClient.Services;
 /// Envia broadcast dirigido por sub-rede de cada interface IPv4 ativa (mais confiável
 /// que 255.255.255.255 em máquinas com VPN/múltiplos adaptadores) e, opcionalmente,
 /// unicast para IPs configurados.
+///
+/// Soma a isso os EFBs que a descoberta encontrar (ver <see cref="IEfbDiscovery"/>),
+/// em unicast direto. Os dois caminhos convivem de propósito: o unicast é o único
+/// que atravessa um roteador com isolamento de clientes, e o broadcast é o único
+/// que sobra quando a descoberta não acontece. Um envio a mais numa rede local não
+/// paga o risco de o piloto perder posição no meio do voo.
 /// </summary>
 public sealed class XgpsBroadcaster : IXgpsBroadcaster
 {
@@ -27,6 +33,7 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
     private static readonly TimeSpan EndpointRefreshInterval = TimeSpan.FromSeconds(30);
 
     private readonly ISimSource _source;
+    private readonly IEfbDiscovery? _discovery;
     private readonly object _settingsLock = new();
 
     private UdpClient? _udp;
@@ -47,9 +54,10 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
     private long _sendFailures;
     private volatile string? _lastSendError;
 
-    public XgpsBroadcaster(ISimSource source, AppSettings settings)
+    public XgpsBroadcaster(ISimSource source, AppSettings settings, IEfbDiscovery? discovery = null)
     {
         _source = source;
+        _discovery = discovery;
         _deviceName = settings.DeviceName;
         _port = settings.Port;
         _xgpsHz = settings.XgpsHz;
@@ -75,11 +83,12 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
     public string? LastSendError => _lastSendError;
 
     /// <summary>
-    /// Instantâneo dos destinos correntes. Força o recálculo quando ainda não há
-    /// nenhum, para a UI não mostrar lista vazia antes do primeiro envio.
+    /// Instantâneo dos destinos correntes — broadcast, unicast configurado e os
+    /// EFBs descobertos. Força o recálculo quando ainda não há nenhum, para a UI
+    /// não mostrar lista vazia antes do primeiro envio.
     /// </summary>
     public IReadOnlyList<string> Destinations =>
-        CurrentEndpoints().Select(e => e.ToString()).ToArray();
+        AllEndpoints().Select(e => e.ToString()).ToArray();
 
     public DateTime? LastSendUtc
     {
@@ -181,7 +190,7 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
         if (udp is null) return;
 
         var payload = Encoding.ASCII.GetBytes(sentence);
-        foreach (var endpoint in CurrentEndpoints())
+        foreach (var endpoint in AllEndpoints())
         {
             try
             {
@@ -205,6 +214,32 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
     }
 
     // ── Descoberta de endpoints ─────────────────────────────────────────
+
+    /// <summary>
+    /// Broadcast e unicast configurado (recalculados a cada 30 s) mais os EFBs
+    /// descobertos, lidos a cada envio.
+    ///
+    /// Os descobertos ficam FORA do cache de propósito: um app que aparece precisa
+    /// receber em segundos, e um que sumiu precisa sair da lista assim que o TTL
+    /// vence — meio minuto de atraso aqui seria meio minuto de tela parada no
+    /// tablet. A leitura é uma lista curta já pronta, então custa quase nada.
+    /// </summary>
+    private IPEndPoint[] AllEndpoints()
+    {
+        var baseEndpoints = CurrentEndpoints();
+
+        var discovered = _discovery?.Targets;
+        if (discovered is not { Count: > 0 })
+            return baseEndpoints;
+
+        var port = _port;
+        var extra = discovered
+            .Where(ip => !baseEndpoints.Any(e => e.Port == port && e.Address.Equals(ip)))
+            .Select(ip => new IPEndPoint(ip, port))
+            .ToArray();
+
+        return extra.Length == 0 ? baseEndpoints : [.. baseEndpoints, .. extra];
+    }
 
     private IPEndPoint[] CurrentEndpoints()
     {

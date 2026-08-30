@@ -31,6 +31,11 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
   **Sem inversão de sinais** — theta/phi já são a convenção do XATT, ao contrário do
   MSFS. A ordem do array `XPlaneFixAssembler.Datarefs` É o contrato de fio (o índice
   vai no pacote e volta na resposta): nunca reordenar. Também NÃO validado num X-Plane real.
+- Descoberta de EFB (`EfbDiscoveryService` no Core): Bonjour `_2gpilot._udp.local`
+  por query mDNS one-shot de porta efêmera (bit QU — NUNCA bindar a 5353, o Windows
+  já tem responder lá) e anúncio JSON na UDP 63093, cujo IP de ORIGEM é o do app.
+  Os dois alimentam `DiscoveredEfbRegistry` (TTL 30 s, teto 4). O unicast SOMA ao
+  broadcast, nunca substitui: se a descoberta cair em voo o piloto perde posição.
 - Todas as fontes rodam juntas via `CompositeSimSource`; quem responder primeiro vence.
 - Plano de voo (botão SYNC PV): `IFlightPlanSource` é capacidade OPCIONAL de uma fonte.
   MSFS/P3D leem o `.PLN` (caminho via `RequestSystemState("FlightPlan")`, com fallback
