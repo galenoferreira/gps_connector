@@ -147,7 +147,18 @@
                     <TextBlock Text="DIAGNÓSTICO" Style="{StaticResource SectionTitle}" />
                 </Expander.Header>
                 <StackPanel Margin="2,12,2,2">
-                    <TextBlock Text="DESTINOS DOS PACOTES" Style="{StaticResource ValueLabel}" />
+                    <TextBlock Text="APPS DESCOBERTOS" Style="{StaticResource ValueLabel}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                        <Ellipse Width="8" Height="8" Fill="{Binding DiscoveryBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding DiscoveryStatusText}" FontSize="11.5"
+                                   Foreground="{StaticResource TextBrush}" Margin="7,0,0,0"
+                                   VerticalAlignment="Center" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding DiscoveredApps}" FontFamily="Consolas" FontSize="11.5"
+                               Foreground="{StaticResource TextBrush}" Margin="15,3,0,0" TextWrapping="Wrap"
+                               Visibility="{Binding HasDiscoveredApps, Converter={StaticResource BoolToVisibility}}" />
+
+                    <TextBlock Text="DESTINOS DOS PACOTES" Style="{StaticResource ValueLabel}" Margin="0,12,0,0" />
                     <TextBlock Text="{Binding DiagDestinations}" FontFamily="Consolas" FontSize="11.5"
                                Foreground="{StaticResource TextBrush}" Margin="0,3,0,0" TextWrapping="Wrap" />
 

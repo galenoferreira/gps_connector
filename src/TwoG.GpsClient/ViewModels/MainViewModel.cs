@@ -21,18 +21,21 @@ public partial class MainViewModel : ObservableObject
     private readonly SettingsService _settingsService;
     private readonly AppSettings _settings;
     private readonly FlightPlanServer _flightPlanServer;
+    private readonly IEfbDiscovery? _discovery;
     private readonly DispatcherTimer _uiTimer;
     private readonly DispatcherTimer _feedbackTimer;
 
     public MainViewModel(ISimSource sim, IXgpsBroadcaster broadcaster,
                          SettingsService settingsService, AppSettings settings,
-                         FlightPlanServer flightPlanServer)
+                         FlightPlanServer flightPlanServer,
+                         IEfbDiscovery? discovery = null)
     {
         _sim = sim;
         _broadcaster = broadcaster;
         _settingsService = settingsService;
         _settings = settings;
         _flightPlanServer = flightPlanServer;
+        _discovery = discovery;
 
         LoadSettingsIntoInputs();
 
@@ -76,6 +79,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _diagCounters = "—";
     [ObservableProperty] private string _diagLastError = "";
     [ObservableProperty] private bool _hasDiagError;
+
+    // ── Apps descobertos ────────────────────────────────────────────────
+    [ObservableProperty] private string _discoveryStatusText = "Nenhum app descoberto";
+    [ObservableProperty] private string _discoveredApps = "";
+    [ObservableProperty] private bool _hasDiscoveredApps;
+    [ObservableProperty] private Brush _discoveryBrush = Dim;
 
     // ── Configurações (campos de edição) ────────────────────────────────
     [ObservableProperty] private string _deviceNameInput = "";
@@ -260,8 +269,45 @@ public partial class MainViewModel : ObservableObject
             $"amostras inválidas {_sim.NonFiniteSamples.ToString("N0", culture)}");
 
         // Um erro de envio é a única prova local de que o pacote nem saiu da máquina.
-        DiagLastError = _broadcaster.LastSendError ?? "";
+        var sendError = _broadcaster.LastSendError;
+        var discoveryError = _discovery?.LastError;
+        DiagLastError = string.Join("  •  ",
+            new[] { sendError, discoveryError }.Where(e => e is { Length: > 0 }));
         HasDiagError = DiagLastError.Length > 0;
+
+        UpdateDiscovery();
+    }
+
+    /// <summary>
+    /// Mostra quantos apps foram descobertos e em quais IPs. Sem isso o piloto não
+    /// tem como conferir se a descoberta funcionou, e um mecanismo que só funciona
+    /// quando funciona não se depura em voo.
+    /// </summary>
+    private void UpdateDiscovery()
+    {
+        var found = _discovery?.Discovered ?? [];
+        HasDiscoveredApps = found.Count > 0;
+
+        if (found.Count == 0)
+        {
+            DiscoveryStatusText = "Nenhum app descoberto — transmitindo só em broadcast";
+            DiscoveredApps = "";
+            DiscoveryBrush = Dim;
+            return;
+        }
+
+        DiscoveryStatusText = found.Count == 1
+            ? "1 app descoberto — recebendo unicast"
+            : $"{found.Count} apps descobertos — recebendo unicast";
+        DiscoveryBrush = Ok;
+
+        var now = DateTime.UtcNow;
+        DiscoveredApps = string.Join("\n", found.Select(efb =>
+        {
+            var how = efb.Source == EfbDiscoverySource.Bonjour ? "Bonjour" : "anúncio";
+            var age = (int)Math.Max(0, (now - efb.LastSeenUtc).TotalSeconds);
+            return $"{efb.Address}  —  {efb.AppName} ({how}, há {age}s)";
+        }));
     }
 
     private static int NormalizeDeg(double deg)

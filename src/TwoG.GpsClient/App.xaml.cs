@@ -18,6 +18,7 @@ public partial class App : Application
     private ISimSource? _sim;
     private XgpsBroadcaster? _broadcaster;
     private FlightPlanServer? _flightPlanServer;
+    private EfbDiscoveryService? _discovery;
 
     /// <summary>
     /// Isolado e sem inline de propósito: o JIT deste método é o primeiro ponto que
@@ -82,10 +83,11 @@ public partial class App : Application
         SimConnectRuntime.Ensure();
 
         _sim = CreateSimSource();
-        _broadcaster = new XgpsBroadcaster(_sim, settings);
+        _discovery = new EfbDiscoveryService();
+        _broadcaster = new XgpsBroadcaster(_sim, settings, _discovery);
         _flightPlanServer = new FlightPlanServer();
         _flightPlanServer.Start(settings.FlightPlanPort);
-        var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings, _flightPlanServer);
+        var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings, _flightPlanServer, _discovery);
 
         var window = new MainWindow { DataContext = viewModel };
         MainWindow = window;
@@ -107,6 +109,7 @@ public partial class App : Application
         showListener.Start();
 
         _sim.Start();
+        _discovery.Start();
         _broadcaster.Start();
 
         // Auto-reparo do auto-start: updates do MSFS às vezes apagam o EXE.xml.
@@ -166,6 +169,7 @@ public partial class App : Application
     {
         _flightPlanServer?.Dispose();
         _broadcaster?.Dispose();
+        _discovery?.Dispose();
         _sim?.Dispose();
         _singleInstanceMutex?.Dispose();
         base.OnExit(e);

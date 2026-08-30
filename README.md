@@ -81,6 +81,8 @@ X-Plane ──────────UDP RREF────┘
 - **Transmissão**: posição (`XGPS`) e atitude (`XATT`) por broadcast dirigido em
   todas as interfaces de rede ativas, mais unicast opcional para IPs específicos.
   Padrão de 2 Hz, ajustável na interface.
+- **Descoberta automática do EFB**: acha o app na rede e passa a mandar unicast
+  direto para ele, *somando* ao broadcast. Ver [Descoberta automática](#descoberta-automática-do-efb).
 - **Pausa inteligente**: com o simulador pausado ou no menu, a transmissão para e
   retoma sozinha quando o voo volta — o EFB não fica com a aeronave congelada.
 - **Iniciar junto com o MSFS**: registra-se no `EXE.xml` do simulador com merge
@@ -90,6 +92,45 @@ X-Plane ──────────UDP RREF────┘
   entrega ao EFB. Ver [Sincronizar plano de voo](#sincronizar-plano-de-voo).
 - **Bandeja do sistema**: fechar a janela mantém a transmissão ativa em segundo
   plano; para encerrar de fato, use **Sair** no menu da bandeja.
+
+## Descoberta automática do EFB
+
+O conector encontra o 2G Pilot sozinho e passa a transmitir **unicast direto para
+o IP do app, além do broadcast** — os dois em paralelo, nunca um no lugar do
+outro. Cada caminho cobre uma falha do outro:
+
+- o **unicast** é o único que atravessa um roteador com *isolamento de clientes*
+  ligado, situação em que broadcast simplesmente não chega ao tablet;
+- o **broadcast** é o único que resta quando a descoberta não acontece — Bonjour
+  bloqueado, app recém-aberto, rede estranha.
+
+Se a descoberta falhar no meio de um voo o piloto não pode perder posição, e o
+custo de um envio a mais numa rede local não paga esse risco.
+
+### Os dois caminhos
+
+**Bonjour.** O app publica `_2gpilot._udp.` na porta 49002 enquanto está
+escutando. O conector pergunta por esse serviço a cada 10 s e usa o IP de quem
+responder. É o mais robusto: acha o app sem depender de ele ter recebido nada
+antes.
+
+**Anúncio na UDP 63093.** A cada 5 s o app emite
+`{"App":"2G Pilot","GDL90":{"port":4000}}`, inclusive de volta para quem
+transmitiu. O IP de origem desse datagrama é o endereço do app. O conector
+escuta essa porta e não precisa de mais nada.
+
+Os dois alimentam a mesma lista, sem duplicar endereço. O destino é solto após
+**30 segundos** sem sinal, e aí o broadcast volta a ser o único caminho até o app
+reaparecer. Cabem até **4 apps** ao mesmo tempo — dois iPads na mesma cabine é
+caso real.
+
+Não há nada para configurar. O painel **Diagnóstico** mostra quantos apps foram
+descobertos, em quais IPs, por qual caminho e há quantos segundos cada um se
+manifestou — sem isso não haveria como o piloto conferir se funcionou.
+
+> As portas não mudam: `XGPS`/`XATT` continuam na 49002, agora também em unicast.
+> O campo `GDL90.port` do anúncio é lido e guardado, mas o conector ainda não
+> transmite GDL 90 — quando transmitir, o destino já estará conhecido.
 
 ## Sincronizar plano de voo
 
@@ -194,6 +235,8 @@ roteador. Ele mostra três coisas que respondem quase toda dúvida de rede:
 |---|---|
 | EFB não recebe posição | Tablet em outra rede/sub-rede Wi-Fi, ou o roteador/AP está com "isolamento de clientes" (AP/client isolation) ligado |
 | Tablet em sub-rede diferente | Informe o IP do tablet em **Configurações → IPs adicionais** (unicast) |
+| Roteador com isolamento de clientes | A [descoberta automática](#descoberta-automática-do-efb) resolve: o unicast passa onde o broadcast não passa. Confira no Diagnóstico se o IP do tablet aparece em "apps descobertos" |
+| Nenhum app descoberto | O app precisa estar aberto e escutando. Bonjour bloqueado por firewall ainda deixa o anúncio da 63093 funcionar, e vice-versa — basta um dos dois |
 | Posição congela no EFB | Simulador pausado ou no menu — normal; retoma sozinho no voo |
 | Posição congela mas o contador de pacotes sobe | O pacote sai e some no caminho: veja `falhas` no Diagnóstico e confirme a sub-rede; muitos APs descartam broadcast para clientes Wi-Fi em economia de energia — a saída é o unicast para o IP do tablet |
 | `amostras inválidas` subindo no Diagnóstico | O simulador está entregando valores não-finitos (respawn, transição de mundo). O app descarta e a transmissão pausa até o dado voltar ao normal |
