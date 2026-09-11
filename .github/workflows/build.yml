@@ -42,14 +42,14 @@ jobs:
           echo "Versão: $v"
 
       - name: Test
-        run: dotnet test tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj -c Release
+        run: dotnet test tests/TwoG.Connector.Core.Tests/TwoG.Connector.Core.Tests.csproj -c Release
 
       # Produz UM único .exe autocontido: as opções de single-file estão no csproj
       # (PublishSingleFile, SelfContained, IncludeNativeLibrariesForSelfExtract,
       # EnableCompressionInSingleFile) junto com RuntimeIdentifier=win-x64.
       - name: Publish (single-file)
         run: >
-          dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj
+          dotnet publish src/TwoG.Connector/TwoG.Connector.csproj
           -c Release
           -p:PublishReadyToRun=true
           -p:Version=${{ env.VERSION }}

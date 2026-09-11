@@ -14,7 +14,7 @@ Data: 2026-08-15 · Base: código na v1.0.1
 | FSX / P3D v1–v3 | Baixa | — | SimConnect só 32 bits | **Descartar** |
 
 **A arquitetura atual já está pronta para isso.** A interface
-[`ISimSource`](../src/TwoG.GpsClient/Services/ISimSource.cs) isola a origem dos dados:
+[`ISimSource`](../src/TwoG.Connector/Services/ISimSource.cs) isola a origem dos dados:
 o broadcaster XGPS, o ViewModel e toda a UI dependem só dela. Adicionar um simulador
 é escrever uma nova implementação — **nenhuma linha do caminho de transmissão muda**.
 
@@ -43,7 +43,7 @@ SimVars que consumimos são idênticas: `PLANE LATITUDE`, `PLANE LONGITUDE`,
 `PLANE HEADING DEGREES TRUE`, `PLANE PITCH DEGREES`, `PLANE BANK DEGREES`,
 `SIM ON GROUND`. As convenções de sinal invertidas (arfagem positiva = nariz para
 baixo, rolagem positiva = esquerda) também são herdadas do FSX, então
-[a negação que já fazemos](../src/TwoG.GpsClient/Services/SimConnectService.cs)
+[a negação que já fazemos](../src/TwoG.Connector/Services/SimConnectService.cs)
 continua correta.
 
 Na prática, `SimConnectService.cs` é reaproveitável quase integralmente.
@@ -85,7 +85,7 @@ aberto e ver se o `SimConnect_Open` tem sucesso. O resultado determina o caminho
 Se for preciso o wrapper da LM, o desenho fica: extrair para pastas separadas
 (`runtime/<versão>/msfs/` e `runtime/<versão>/p3d/`) e carregar só o par
 correspondente ao simulador detectado — o
-[`SimConnectRuntime`](../src/TwoG.GpsClient/Services/SimConnectRuntime.cs) já faz
+[`SimConnectRuntime`](../src/TwoG.Connector/Services/SimConnectRuntime.cs) já faz
 exatamente esse tipo de extração e pré-carga.
 
 ### Pendência jurídica
@@ -104,7 +104,7 @@ a questão por completo, ao custo de uma dependência externa.
 - Configuração do usuário: `%APPDATA%\Lockheed Martin\Prepar3D v5\`
 
 O `EXE.xml` para autostart existe no P3D no mesmo formato do MSFS — a classe
-[`ExeXmlAutoStart`](../src/TwoG.GpsClient/Services/ExeXmlAutoStart.cs) funciona lá
+[`ExeXmlAutoStart`](../src/TwoG.Connector/Services/ExeXmlAutoStart.cs) funciona lá
 com apenas novos caminhos em `MsfsInstallations`.
 
 ---
@@ -237,7 +237,7 @@ Nenhuma mudança no card de transmissão, no de posição ou nas configurações
 
 ### Testes
 
-O `TwoG.GpsClient.Core` continua sendo a camada testável e multiplataforma. O
+O `TwoG.Connector.Core` continua sendo a camada testável e multiplataforma. O
 parser RREF e o mapeamento de datarefs para `GpsFix` **devem morar lá** — são
 lógica pura, testável no macOS sem simulador, exatamente como as sentenças XGPS
 hoje. É o maior ganho de qualidade disponível neste projeto.

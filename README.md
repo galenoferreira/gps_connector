@@ -249,19 +249,19 @@ roteador. Ele mostra três coisas que respondem quase toda dúvida de rede:
 ## Desenvolvimento
 
 ```
-src/TwoG.GpsClient/        App WPF (.NET 10, x64) — UI, SimConnect, broadcaster
-src/TwoG.GpsClient.Core/   Lógica pura do protocolo (multiplataforma, testável)
+src/TwoG.Connector/        App WPF (.NET 10, x64) — UI, SimConnect, broadcaster
+src/TwoG.Connector.Core/   Lógica pura do protocolo (multiplataforma, testável)
 tests/                     Testes de unidade do protocolo
 libs/                      DLLs do SimConnect (MSFS SDK) e do runtime VC++ x64
 installer/setup.iss        Instalador Inno Setup (opcional)
 ```
 
 ```bash
-dotnet test tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj
+dotnet test tests/TwoG.Connector.Core.Tests/TwoG.Connector.Core.Tests.csproj
 ```
 
 ```bash
-dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj -c Release -o publish
+dotnet publish src/TwoG.Connector/TwoG.Connector.csproj -c Release -o publish
 ```
 
 Ambos rodam em qualquer sistema operacional — o csproj traz `EnableWindowsTargeting`
@@ -292,7 +292,7 @@ avisa que componentes managed C++ não são adequados a single-file — assembli
 bundle são carregados da memória, o que não funciona para mixed-mode.
 
 Em vez disso, elas viajam como **recursos embutidos** e o
-[`SimConnectRuntime`](src/TwoG.GpsClient/Services/SimConnectRuntime.cs) as extrai
+[`SimConnectRuntime`](src/TwoG.Connector/Services/SimConnectRuntime.cs) as extrai
 para `%LOCALAPPDATA%` na primeira execução, carregando-as de arquivos reais em
 disco. Junto vão `MSVCP140.dll`, `VCRUNTIME140.dll` e `VCRUNTIME140_1.dll`, que a
 `SimConnect.dll` importa: sem elas, uma máquina que nunca instalou o Visual C++

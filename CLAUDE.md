@@ -6,7 +6,7 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
 
 ## Estrutura
 
-- `src/TwoG.GpsClient/` — app WPF (namespace `TwoG.GpsClient`, exe `2G-GPS-Cliente.exe`)
+- `src/TwoG.Connector/` — app WPF (namespace `TwoG.Connector`, exe `2G-GPS-Cliente.exe`)
   - `Services/SimConnectService.cs` — conexão/retry SimConnect, normaliza unidades para `GpsFix`
   - `Services/XgpsBroadcaster.cs` — sentenças XGPS/XATT via UDP (broadcast + unicast opcional)
   - `ViewModels/MainViewModel.cs` — UI orientada por polling (DispatcherTimer 250 ms)
