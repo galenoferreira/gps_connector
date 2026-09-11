@@ -52,4 +52,27 @@ public class SettingsMigrationTests
         Assert.False(SettingsMigration.CopyLegacyIfMissing(current, tmp.Sub("old")));
         Assert.False(Directory.Exists(current));
     }
+
+    /// <summary>
+    /// Até a v1.3.0 a pasta era criada a cada início, mas o settings.json só era
+    /// gravado ao clicar em Aplicar. Quem nunca mexeu em nada transmitia "2G GPS".
+    /// </summary>
+    [Fact]
+    public void UpgradeWithoutSavedSettingsKeepsLegacyDeviceName()
+    {
+        using var tmp = new TestTempDir();
+        var legacy = tmp.Sub("2G GPS Cliente");
+        Directory.CreateDirectory(legacy);
+
+        Assert.False(SettingsMigration.CopyLegacyIfMissing(tmp.Sub("2G Connector"), legacy));
+        Assert.Equal("2G GPS", SettingsMigration.DefaultDeviceName(legacy));
+    }
+
+    [Fact]
+    public void FreshInstallGetsNewDeviceName()
+    {
+        using var tmp = new TestTempDir();
+
+        Assert.Equal(ProductIdentity.DefaultDeviceName, SettingsMigration.DefaultDeviceName(tmp.Sub("2G GPS Cliente")));
+    }
 }

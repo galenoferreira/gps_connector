@@ -8,13 +8,17 @@ public sealed class SettingsService
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly string _path;
+    private readonly string _defaultDeviceName;
 
     public SettingsService()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var dir = Path.Combine(appData, Core.ProductIdentity.DataFolderName);
+        var legacyDir = Path.Combine(appData, Core.ProductIdentity.LegacyDataFolderName);
         // Primeira execução depois da v1.3.0: traz a configuração antiga.
-        Core.SettingsMigration.CopyLegacyIfMissing(dir, Path.Combine(appData, Core.ProductIdentity.LegacyDataFolderName));
+        Core.SettingsMigration.CopyLegacyIfMissing(dir, legacyDir);
+        // Sem arquivo gravado, quem veio da v1.3.0 continua com "2G GPS".
+        _defaultDeviceName = Core.SettingsMigration.DefaultDeviceName(legacyDir);
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, Core.SettingsMigration.FileName);
     }
@@ -34,7 +38,7 @@ public sealed class SettingsService
         {
             // Arquivo corrompido ou ilegível: volta ao padrão.
         }
-        return new AppSettings();
+        return new AppSettings { DeviceName = _defaultDeviceName };
     }
 
     public void Save(AppSettings settings)
@@ -49,10 +53,10 @@ public sealed class SettingsService
         }
     }
 
-    private static AppSettings Sanitize(AppSettings s)
+    private AppSettings Sanitize(AppSettings s)
     {
         s.DeviceName = Core.XgpsSentences.SanitizeDeviceName(s.DeviceName);
-        if (s.DeviceName.Length == 0) s.DeviceName = Core.ProductIdentity.DefaultDeviceName;
+        if (s.DeviceName.Length == 0) s.DeviceName = _defaultDeviceName;
         if (s.Port is < 1 or > 65535) s.Port = 49002;
         if (s.XgpsHz is < 0.5 or > 10) s.XgpsHz = 2.0;
         if (s.XattHz is < 1 or > 10) s.XattHz = 2.0;

@@ -18,8 +18,14 @@ public static class ProductIdentity
     public const string DataFolderName = Name;
     public const string LegacyDataFolderName = LegacyName;
 
-    /// <summary>Nome nas sentenças XGPS para quem não tem configuração gravada.</summary>
+    /// <summary>Nome nas sentenças XGPS numa instalação nova, sem configuração gravada.</summary>
     public const string DefaultDeviceName = "2G Connector";
+
+    /// <summary>
+    /// Padrão até a v1.3.0. Quem atualiza sem nunca ter gravado configuração
+    /// continua com ele: o nome aparece no EFB e não deve mudar sem aviso.
+    /// </summary>
+    public const string LegacyDefaultDeviceName = "2G GPS";
 
     public const string GitHubRepository = "galenoferreira/gps_connector";
 

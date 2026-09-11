@@ -35,4 +35,13 @@ public static class SettingsMigration
             return false;
         }
     }
+
+    /// <summary>
+    /// Nome de dispositivo para quem não tem <c>settings.json</c> na pasta nova.
+    /// Da v1.0 à v1.3.0 a pasta <paramref name="legacyDir"/> era criada a cada
+    /// início, mas o arquivo só era gravado ao clicar em Aplicar. Pasta antiga
+    /// presente é, portanto, quem atualiza, e transmitia o padrão antigo.
+    /// </summary>
+    public static string DefaultDeviceName(string legacyDir) =>
+        Directory.Exists(legacyDir) ? ProductIdentity.LegacyDefaultDeviceName : ProductIdentity.DefaultDeviceName;
 }
