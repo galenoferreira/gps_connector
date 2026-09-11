@@ -1,5 +1,5 @@
 ; ══════════════════════════════════════════════════════════════════════════════
-;  2G GPS Cliente for MSFS — instalador (Inno Setup 6)
+;  2G Connector — instalador (Inno Setup 6)
 ;
 ;  Decisões (ver docs/pesquisa no repositório):
 ;   • Instalação POR USUÁRIO (PrivilegesRequired=lowest): sem UAC, e as constantes
@@ -19,12 +19,18 @@
   #define AppVersion "1.0.0"
 #endif
 
-#define MyAppName "2G GPS Cliente for MSFS"
-#define MyAppShortName "2G GPS Cliente"
+#define MyAppName "2G Connector"
+#define MyAppShortName "2G Connector"
 #define MyAppPublisher "2G"
-#define MyAppExeName "2G-GPS-Cliente.exe"
+#define MyAppExeName "2G-Connector.exe"
+
+; Nomes da v1.3.0, só para limpar o que ela deixou ([InstallDelete] e [Registry]).
+#define LegacyAppName "2G GPS Cliente for MSFS"
+#define LegacyShortName "2G GPS Cliente"
+#define LegacyExeName "2G-GPS-Cliente.exe"
 
 [Setup]
+; Mesmo AppId da v1.3.0: é o que faz o instalador ATUALIZAR em vez de instalar ao lado.
 AppId={{B23B9502-7C57-45EF-9075-D53016835238}
 AppName={#MyAppName}
 AppVersion={#AppVersion}
@@ -40,11 +46,12 @@ SolidCompression=yes
 OutputDir=..\dist
 ; Nome SEM versão: é o alvo do link permanente /releases/latest/download/.
 ; A versão vai no AppVersion (visível em "Adicionar ou remover programas").
-OutputBaseFilename=2G-GPS-Cliente-Setup
+OutputBaseFilename=2G-Connector-Setup
 SetupIconFile=..\src\TwoG.Connector\Assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 CloseApplications=yes
+; Nome herdado da v1.3.0 de propósito — ver ProductIdentity.SingleInstanceMutexName.
 AppMutex=Local\TwoG.GpsClient.SingleInstance
 
 [Languages]
@@ -72,12 +79,21 @@ Name: "autostart"; Description: "{cm:AutostartTask}"; Flags: unchecked
 [Files]
 Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Atualização sobre a v1.3.0: o exe e os atalhos com o nome antigo. Sem isto o
+; atalho velho do Menu Iniciar continuaria lá, apontando para um exe que sumiu.
+Type: files; Name: "{app}\{#LegacyExeName}"
+Type: files; Name: "{autoprograms}\{#LegacyAppName}.lnk"
+Type: files; Name: "{autodesktop}\{#LegacyShortName}.lnk"
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppShortName}"; ValueData: """{app}\{#MyAppExeName}"" -minimized"; Tasks: autostart; Flags: uninsdeletevalue
+; Valor da v1.3.0 na chave Run: removido sempre, marcada ou não a tarefa nova.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#LegacyShortName}"; Flags: deletevalue
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppShortName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
