@@ -111,6 +111,19 @@ public class ExeXmlDocumentTests
     [Fact]
     public void Register_CollapsesDuplicateEntriesOfOurs()
     {
+        var doc = ExeXmlDocument.CreateEmpty();
+        doc.Root!.Add(
+            new XElement("Launch.Addon", new XElement("Name", "2G Connector"), new XElement("Path", "a")),
+            new XElement("Launch.Addon", new XElement("Name", "2G Connector"), new XElement("Path", "b")));
+
+        ExeXmlDocument.Register(doc, NewExe);
+
+        Assert.Equal(NewExe, (string?)Ours(doc).Element("Path"));
+    }
+
+    [Fact]
+    public void Register_CollapsesDuplicate_WhenFirstIsCurrent_IsChanged()
+    {
         // A primeira já está certa: só a remoção da duplicata justifica gravar.
         var doc = ExeXmlDocument.CreateEmpty();
         ExeXmlDocument.Register(doc, NewExe);
