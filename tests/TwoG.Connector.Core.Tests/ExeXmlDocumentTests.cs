@@ -78,6 +78,25 @@ public class ExeXmlDocumentTests
     }
 
     [Fact]
+    public void Register_WhenCurrentButLegacyCameBack_RemovesItAndIsChanged()
+    {
+        // Pingue-pongue: depois da migração a v1.3.0 recoloca a entrada legada,
+        // e a nossa continua certa. Sem Changed o arquivo não é gravado e a
+        // legada fica no EXE.xml para sempre.
+        var doc = XDocument.Parse(WithLegacyAndFsuipc);
+        ExeXmlDocument.Register(doc, NewExe);
+        doc.Root!.Add(new XElement("Launch.Addon",
+            new XElement("Name", "2G GPS Cliente"),
+            new XElement("Disabled", "False"),
+            new XElement("Path", @"C:\Users\p\Downloads\2G-GPS-Cliente.exe"),
+            new XElement("CommandLine", "-minimized")));
+
+        Assert.Equal(ExeXmlDocument.Outcome.Changed, ExeXmlDocument.Register(doc, NewExe));
+
+        Assert.Equal(["FSUIPC7", "2G Connector"], Names(doc));
+    }
+
+    [Fact]
     public void Register_WhenExeMoved_UpdatesPathInPlace()
     {
         var doc = ExeXmlDocument.CreateEmpty();
@@ -92,12 +111,13 @@ public class ExeXmlDocumentTests
     [Fact]
     public void Register_CollapsesDuplicateEntriesOfOurs()
     {
+        // A primeira já está certa: só a remoção da duplicata justifica gravar.
         var doc = ExeXmlDocument.CreateEmpty();
+        ExeXmlDocument.Register(doc, NewExe);
         doc.Root!.Add(
-            new XElement("Launch.Addon", new XElement("Name", "2G Connector"), new XElement("Path", "a")),
             new XElement("Launch.Addon", new XElement("Name", "2G Connector"), new XElement("Path", "b")));
 
-        ExeXmlDocument.Register(doc, NewExe);
+        Assert.Equal(ExeXmlDocument.Outcome.Changed, ExeXmlDocument.Register(doc, NewExe));
 
         Assert.Equal(NewExe, (string?)Ours(doc).Element("Path"));
     }
