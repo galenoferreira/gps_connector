@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using TwoG.Connector.Core;
 
 namespace TwoG.Connector.Services;
 
@@ -12,16 +13,13 @@ namespace TwoG.Connector.Services;
 ///
 /// Regras de segurança (um EXE.xml corrompido impede o MSFS de abrir):
 ///  - sempre faz merge com parser XML de verdade — nunca concatena texto;
-///  - preserva entradas de outros add-ons; mexe apenas no nó com o nosso Name;
+///  - preserva entradas de outros add-ons; mexe apenas no nó com o nosso Name e no da v1.3.0, que é migrado (ver ExeXmlDocument);
 ///  - cria backup (.2g-backup) antes de cada gravação;
 ///  - arquivo ilegível/malformado é PULADO, nunca sobrescrito;
 ///  - grava UTF-8 SEM BOM (BOM é causa documentada de quebra).
 /// </summary>
 public sealed class ExeXmlAutoStart
 {
-    public const string AddonName = "2G GPS Cliente";
-    private const string LaunchCommandLine = "-minimized";
-
     static ExeXmlAutoStart()
     {
         // EXE.xml de outros add-ons frequentemente declara encoding="Windows-1252"
@@ -90,37 +88,20 @@ public sealed class ExeXmlAutoStart
         }
         else
         {
-            doc = new XDocument(
-                new XElement("SimBase.Document",
-                    new XAttribute("Type", "Launch"),
-                    new XAttribute("version", "1,0"),
-                    new XElement("Descr", "Launch"),
-                    new XElement("Filename", "EXE.xml"),
-                    new XElement("Disabled", "False")));
+            doc = ExeXmlDocument.CreateEmpty();
         }
 
-        var root = doc.Root;
-        if (root is null || root.Name.LocalName != "SimBase.Document")
-            return new SyncResult(install.DisplayName, false,
-                "EXE.xml existente tem estrutura inesperada — não modificado por segurança");
-
-        var ours = FindOurAddon(root);
-        if (ours is null)
+        switch (ExeXmlDocument.Register(doc, exePath))
         {
-            ours = new XElement("Launch.Addon");
-            root.Add(ours);
+            case ExeXmlDocument.Outcome.Malformed:
+                return new SyncResult(install.DisplayName, false,
+                    "EXE.xml existente tem estrutura inesperada — não modificado por segurança");
+            case ExeXmlDocument.Outcome.Unchanged:
+                return new SyncResult(install.DisplayName, true, "já registrado");
+            default:
+                Save(doc, install.ExeXmlPath);
+                return new SyncResult(install.DisplayName, true, "registrado");
         }
-
-        // Reescreve apenas o NOSSO nó, na ordem convencional (FSUIPC).
-        ours.RemoveAll();
-        ours.Add(
-            new XElement("Name", AddonName),
-            new XElement("Disabled", "False"),
-            new XElement("Path", exePath),
-            new XElement("CommandLine", LaunchCommandLine));
-
-        Save(doc, install.ExeXmlPath);
-        return new SyncResult(install.DisplayName, true, "registrado");
     }
 
     private SyncResult Unregister(SimInstall install)
@@ -129,23 +110,22 @@ public sealed class ExeXmlAutoStart
             return new SyncResult(install.DisplayName, true, "sem registro");
 
         var doc = TryLoad(install.ExeXmlPath);
-        if (doc?.Root is null)
+        if (doc is null)
             return new SyncResult(install.DisplayName, false,
                 "EXE.xml malformado — não modificado por segurança");
 
-        var ours = FindOurAddon(doc.Root);
-        if (ours is null)
-            return new SyncResult(install.DisplayName, true, "sem registro");
-
-        ours.Remove();
-        Save(doc, install.ExeXmlPath);
-        return new SyncResult(install.DisplayName, true, "registro removido");
+        switch (ExeXmlDocument.Unregister(doc))
+        {
+            case ExeXmlDocument.Outcome.Malformed:
+                return new SyncResult(install.DisplayName, false,
+                    "EXE.xml tem estrutura inesperada — não modificado por segurança");
+            case ExeXmlDocument.Outcome.Unchanged:
+                return new SyncResult(install.DisplayName, true, "sem registro");
+            default:
+                Save(doc, install.ExeXmlPath);
+                return new SyncResult(install.DisplayName, true, "registro removido");
+        }
     }
-
-    private static XElement? FindOurAddon(XElement root) =>
-        root.Elements("Launch.Addon")
-            .FirstOrDefault(a =>
-                string.Equals((string?)a.Element("Name"), AddonName, StringComparison.OrdinalIgnoreCase));
 
     private static XDocument? TryLoad(string path)
     {
