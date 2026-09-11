@@ -7,7 +7,7 @@
         xmlns:vm="clr-namespace:TwoG.Connector.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
-        Title="2G GPS Cliente for MSFS"
+        Title="2G Connector"
         Width="470" SizeToContent="Height"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen"
@@ -28,7 +28,7 @@
         <!-- Ícone de bandeja -->
         <tb:TaskbarIcon x:Name="TrayIcon"
                         IconSource="pack://application:,,,/Assets/app.ico"
-                        ToolTipText="2G GPS Cliente for MSFS"
+                        ToolTipText="2G Connector"
                         TrayMouseDoubleClick="TrayOpen_Click">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu>
@@ -56,9 +56,9 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Grid.Column="1" Margin="13,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="2G GPS Cliente" FontSize="19" FontWeight="Bold"
+                <TextBlock Text="2G Connector" FontSize="19" FontWeight="Bold"
                            Foreground="{StaticResource TextBrush}" />
-                <TextBlock Text="for Microsoft Flight Simulator" FontSize="12"
+                <TextBlock Text="MSFS • Prepar3D • X-Plane" FontSize="12"
                            Foreground="{StaticResource DimBrush}" Margin="1,1,0,0" />
             </StackPanel>
         </Grid>

@@ -1,10 +1,10 @@
 namespace TwoG.Connector.Configuration;
 
-/// <summary>Configurações persistidas em %APPDATA%\2G GPS Cliente\settings.json.</summary>
+/// <summary>Configurações persistidas em %APPDATA%\2G Connector\settings.json.</summary>
 public sealed class AppSettings
 {
     /// <summary>Nome do dispositivo mostrado no EFB (prefixo das sentenças XGPS/XATT).</summary>
-    public string DeviceName { get; set; } = "2G GPS";
+    public string DeviceName { get; set; } = Core.ProductIdentity.DefaultDeviceName;
 
     /// <summary>Porta UDP de destino (padrão XGPS: 49002).</summary>
     public int Port { get; set; } = 49002;

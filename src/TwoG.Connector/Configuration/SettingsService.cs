@@ -11,11 +11,12 @@ public sealed class SettingsService
 
     public SettingsService()
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "2G GPS Cliente");
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var dir = Path.Combine(appData, Core.ProductIdentity.DataFolderName);
+        // Primeira execução depois da v1.3.0: traz a configuração antiga.
+        Core.SettingsMigration.CopyLegacyIfMissing(dir, Path.Combine(appData, Core.ProductIdentity.LegacyDataFolderName));
         Directory.CreateDirectory(dir);
-        _path = Path.Combine(dir, "settings.json");
+        _path = Path.Combine(dir, Core.SettingsMigration.FileName);
     }
 
     public AppSettings Load()
@@ -51,7 +52,7 @@ public sealed class SettingsService
     private static AppSettings Sanitize(AppSettings s)
     {
         s.DeviceName = Core.XgpsSentences.SanitizeDeviceName(s.DeviceName);
-        if (s.DeviceName.Length == 0) s.DeviceName = "2G GPS";
+        if (s.DeviceName.Length == 0) s.DeviceName = Core.ProductIdentity.DefaultDeviceName;
         if (s.Port is < 1 or > 65535) s.Port = 49002;
         if (s.XgpsHz is < 0.5 or > 10) s.XgpsHz = 2.0;
         if (s.XattHz is < 1 or > 10) s.XattHz = 2.0;

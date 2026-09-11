@@ -10,8 +10,8 @@ namespace TwoG.Connector;
 
 public partial class App : Application
 {
-    private const string MutexName = @"Local\TwoG.GpsClient.SingleInstance";
-    private const string ShowEventName = @"Local\TwoG.GpsClient.ShowWindow";
+    private const string MutexName = ProductIdentity.SingleInstanceMutexName;
+    private const string ShowEventName = ProductIdentity.ShowWindowEventName;
 
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _showEvent;
@@ -142,7 +142,7 @@ public partial class App : Application
         {
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "2G GPS Cliente");
+                ProductIdentity.DataFolderName);
             Directory.CreateDirectory(dir);
             logPath = Path.Combine(dir, "erro.log");
             File.AppendAllText(logPath,
@@ -157,7 +157,7 @@ public partial class App : Application
         {
             var detail = logPath.Length > 0 ? $"{Environment.NewLine}{Environment.NewLine}Detalhes em: {logPath}" : "";
             MessageBox.Show($"Ocorreu um erro inesperado:{Environment.NewLine}{Environment.NewLine}{ex.Message}{detail}",
-                "2G GPS Cliente", MessageBoxButton.OK, MessageBoxImage.Error);
+                ProductIdentity.Name, MessageBoxButton.OK, MessageBoxImage.Error);
         }
         catch (Exception)
         {

@@ -16,7 +16,7 @@ namespace TwoG.Connector.Core;
 /// </summary>
 /// <param name="AppName">Nome declarado pelo app ("2G Pilot", "ForeFlight").</param>
 /// <param name="Gdl90Port">
-/// Porta em que o app quer receber GDL 90, quando declarada. O 2G GPS Cliente
+/// Porta em que o app quer receber GDL 90, quando declarada. O 2G Connector
 /// ainda não fala GDL 90 — o campo é preservado para quando falar.
 /// </param>
 public sealed record EfbAnnouncement(string AppName, int? Gdl90Port)

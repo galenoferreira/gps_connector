@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using Hardcodet.Wpf.TaskbarNotification;
+using TwoG.Connector.Core;
 using TwoG.Connector.ViewModels;
 
 namespace TwoG.Connector;
@@ -51,7 +52,7 @@ public partial class MainWindow : Window
             if (!_trayBalloonShown)
             {
                 _trayBalloonShown = true;
-                TrayIcon.ShowBalloonTip("2G GPS Cliente",
+                TrayIcon.ShowBalloonTip(ProductIdentity.Name,
                     "Continua transmitindo na bandeja do sistema.", BalloonIcon.Info);
             }
             return;

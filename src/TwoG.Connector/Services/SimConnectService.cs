@@ -29,7 +29,7 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
 {
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(3);
 
-    private const string ClientName = "2G GPS Cliente";
+    private const string ClientName = ProductIdentity.Name;
 
     private enum DEFINITION { Position }
     private enum REQUEST { Position, FlightPlan }

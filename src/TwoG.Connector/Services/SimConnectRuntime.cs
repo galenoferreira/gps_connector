@@ -2,6 +2,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
+using TwoG.Connector.Core;
 
 namespace TwoG.Connector.Services;
 
@@ -14,7 +15,7 @@ namespace TwoG.Connector.Services;
 /// Microsoft é explícita — "Managed C++ components aren't well suited for single
 /// file deployment" — porque assemblies do bundle são carregados da MEMÓRIA, o que
 /// não funciona para mixed-mode. Aqui elas são extraídas para
-/// %LOCALAPPDATA%\2G GPS Cliente\runtime\&lt;versão&gt;\ e carregadas de arquivos reais
+/// %LOCALAPPDATA%\2G Connector\runtime\&lt;versão&gt;\ e carregadas de arquivos reais
 /// em disco, que é o cenário suportado.
 ///
 /// <see cref="Ensure"/> precisa rodar ANTES de qualquer código que toque tipos do
@@ -61,7 +62,7 @@ internal static class SimConnectRuntime
             var version = typeof(SimConnectRuntime).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "2G GPS Cliente", "runtime", version);
+                ProductIdentity.DataFolderName, "runtime", version);
             Directory.CreateDirectory(dir);
 
             // Runtime C++ primeiro: sem ele a SimConnect.dll falha com erro 126.
