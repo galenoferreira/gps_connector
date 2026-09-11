@@ -8,7 +8,8 @@
 ;   • O app só ENVIA UDP (broadcast XGPS): não precisa de regra de firewall
 ;     (política padrão do Windows libera todo tráfego de saída).
 ;   • O registro no EXE.xml (iniciar junto com o simulador) é feito PELO APP,
-;     que se auto-repara a cada execução; o desinstalador chama "-unregister".
+;     que se auto-repara a cada execução; o instalador chama "-register" e o
+;     desinstalador, "-unregister".
 ;   • Publicação self-contained: nenhum pré-requisito de runtime .NET.
 ;
 ;  Compilar:  iscc setup.iss /DAppVersion=1.0.0
@@ -93,9 +94,15 @@ Name: "{autodesktop}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"; Task
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppShortName}"; ValueData: """{app}\{#MyAppExeName}"" -minimized"; Tasks: autostart; Flags: uninsdeletevalue
 ; Valor da v1.3.0 na chave Run: removido sempre, marcada ou não a tarefa nova.
+; O "desabilitado" do Gerenciador de Tarefas vai para o nome novo em MigrateStartupApproved.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#LegacyShortName}"; Flags: deletevalue
 
 [Run]
+; Registra no EXE.xml já na instalação, se o usuário quer iniciar com o simulador.
+; Na atualização da v1.3.0 o [InstallDelete] apaga o exe antigo, e a entrada legada
+; ficaria apontando para ele até o app novo ser aberto: com a última caixa desmarcada
+; ou em modo silencioso, o simulador deixaria de lançar o conector.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "-register"; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppShortName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -134,4 +141,29 @@ begin
     ExpandConstant('{cm:DetectDescription}'),
     ExpandConstant('{cm:DetectSubCaption}'),
     DetectSims());
+end;
+
+const
+  StartupApprovedRun = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
+
+// O Gerenciador de Tarefas guarda "desabilitado" pelo NOME do valor da chave Run, e
+// valor sem registro ali conta como habilitado. Como o nome mudou, a escolha feita
+// para o nome antigo vai junto: sem isto, quem desabilitou lá voltaria a ver o
+// conector abrindo com o Windows. O registro antigo sai sempre, como o valor da Run.
+procedure MigrateStartupApproved();
+var
+  State: AnsiString;
+begin
+  if not RegQueryBinaryValue(HKEY_CURRENT_USER, StartupApprovedRun, '{#LegacyShortName}', State) then
+    Exit;
+  if WizardIsTaskSelected('autostart') and
+     not RegValueExists(HKEY_CURRENT_USER, StartupApprovedRun, '{#MyAppShortName}') then
+    RegWriteBinaryValue(HKEY_CURRENT_USER, StartupApprovedRun, '{#MyAppShortName}', State);
+  RegDeleteValue(HKEY_CURRENT_USER, StartupApprovedRun, '{#LegacyShortName}');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    MigrateStartupApproved();
 end;

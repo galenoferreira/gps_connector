@@ -50,6 +50,14 @@ public partial class App : Application
             return;
         }
 
+        // Chamado pelo instalador: registra nos EXE.xml, se configurado, e sai.
+        if (e.Args.Any(a => string.Equals(a, "-register", StringComparison.OrdinalIgnoreCase)))
+        {
+            RegisterFromInstaller();
+            Shutdown();
+            return;
+        }
+
         var startMinimizedArg = e.Args.Any(a =>
             string.Equals(a, "-minimized", StringComparison.OrdinalIgnoreCase)
             || string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
@@ -126,6 +134,27 @@ public partial class App : Application
                     // Melhor esforço; o usuário pode ressincronizar pela UI.
                 }
             });
+        }
+    }
+
+    /// <summary>
+    /// "-register": o mesmo autorreparo do EXE.xml da abertura, sem UI. Na
+    /// atualização sobre a v1.3.0 o instalador apaga o exe antigo; sem isto a entrada
+    /// legada ficaria apontando para ele até o app novo ser aberto, e o simulador
+    /// deixaria de lançar o conector. Respeita "iniciar com o simulador".
+    /// </summary>
+    private static void RegisterFromInstaller()
+    {
+        try
+        {
+            if (new SettingsService().Load().StartWithSim)
+                new ExeXmlAutoStart().Sync(enabled: true);
+        }
+        catch (Exception)
+        {
+            // Melhor esforço, sem deixar exceção escapar: o ReportFatal abriria uma
+            // mensagem, e o instalador ficaria parado esperando este processo.
+            // A próxima abertura do app repara.
         }
     }
 

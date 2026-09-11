@@ -3747,9 +3747,10 @@ Com aprovação, depois do merge no `PROD`:
 1. Tag `v1.4.0-rc.1` no `PROD`. Pré-release: não assume o `latest`, os links do site não mudam. Confere no release que `update.json` e `update.json.sig` foram publicados.
 2. Numa máquina Windows **com a v1.3.0 instalada pelo instalador**, rodar o `2G-Connector-Setup.exe` do rc.1 e conferir:
    - configuração preservada (nome de dispositivo, IPs unicast);
-   - `EXE.xml` do MSFS só com a entrada `2G Connector`, apontando para o exe novo;
+   - `EXE.xml` do MSFS só com a entrada `2G Connector`, apontando para o exe novo — já ao fim do instalador, mesmo com a caixa "Executar 2G Connector" desmarcada (é o `-register` do `[Run]`);
    - atalhos antigos sumiram do Menu Iniciar e da área de trabalho;
    - valor `2G GPS Cliente` ausente em `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`;
+   - com a tarefa "iniciar com o Windows" marcada na v1.3.0 e o app desabilitado no Gerenciador de Tarefas (aba Aplicativos de inicialização): o `2G Connector` aparece lá desabilitado, e o valor `2G GPS Cliente` sumiu de `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`;
    - abrir o exe antigo à mão (se ainda existir em outra pasta) não cria segunda instância.
 3. Em outra pasta, baixar o `2G-Connector.exe` avulso do rc.1 e executar: o `EXE.xml` passa a apontar para ele.
 4. Instalação limpa numa máquina sem nada: nomes, pastas, dispositivo "2G Connector".
