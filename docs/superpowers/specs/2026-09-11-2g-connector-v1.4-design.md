@@ -224,6 +224,16 @@ Windows. Sem dependência nova no exe único e sem criptografia escrita à mão.
   Guardar um backup offline de `update-signing.pem`. Perder a chave obriga todo
   usuário a atualizar manualmente uma vez, para receber uma versão com chave nova.
 
+- **Par gerado em 2026-09-11**, secret `UPDATE_SIGNING_KEY` configurado no mesmo dia.
+  Chave pública a embutir no Core:
+
+  ```
+  -----BEGIN PUBLIC KEY-----
+  MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEkU39e98bOMDbzZsTK1VvFMqqFum/
+  HvGSzgEtgfETqNCJSdUisfjCt7BVr8WgX51D+sGc7Tz9iNdW6NOAE3Rm0Q==
+  -----END PUBLIC KEY-----
+  ```
+
 - No CI, **um release de tag falha se o secret não estiver configurado**. Nunca se
   publica manifesto sem assinatura.
 
