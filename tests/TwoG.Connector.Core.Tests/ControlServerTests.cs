@@ -211,6 +211,53 @@ public class ControlServerTests : IDisposable
     }
 
     [Fact]
+    public async Task UnsupportedProtocolGetsAnErrorAndCloses4002()
+    {
+        var ws = await ConnectAsync();
+
+        await SendAsync(ws, """{"type":"hello","protocol":2,"app":"2G Pilot","device":{"id":"ipad-1","name":"iPad de teste"}}""");
+
+        Assert.Equal(ControlErrors.ProtocolUnsupported, (await ExpectAsync(ws, "error")).GetProperty("code").GetString());
+        Assert.Equal(ControlSession.CloseProtocolUnsupported, await ExpectCloseAsync(ws));
+    }
+
+    /// <summary>Rajada de sets válidos, sem ler as respostas no meio.</summary>
+    private static async Task SendSetsAsync(ClientWebSocket ws, int count)
+    {
+        for (var i = 0; i < count; i++)
+            await SendAsync(ws, $$"""{"type":"set","id":"r{{i}}","control":"com1.standby","value":118500000}""");
+    }
+
+    [Fact]
+    public async Task BurstAboveTheRateLimitGetsRateLimited()
+    {
+        var (ws, _) = await PairAsync();
+        var burst = ControlSession.MaxCommandsPerSecond + 1;
+
+        await SendSetsAsync(ws, burst);
+
+        var errors = new List<string?>();
+        for (var i = 0; i < burst; i++)
+        {
+            var result = await ExpectAsync(ws, "result");
+            errors.Add(result.TryGetProperty("error", out var error) ? error.GetString() : null);
+        }
+        Assert.Contains(ControlErrors.RateLimited, errors);
+        Assert.Equal(WebSocketState.Open, ws.State);
+    }
+
+    [Fact]
+    public async Task PersistentExcessCloses4008()
+    {
+        var (ws, _) = await PairAsync();
+
+        // 20 aceitos no primeiro segundo; daí em diante, recusas. A 101ª em 10 s fecha.
+        await SendSetsAsync(ws, ControlSession.MaxCommandsPerSecond + ControlSession.MaxRefusalsPer10Seconds + 10);
+
+        Assert.Equal(ControlSession.CloseRateLimited, await ExpectCloseAsync(ws));
+    }
+
+    [Fact]
     public async Task RemovingTheDeviceClosesItsConnectionWith4001()
     {
         var (ws, _) = await PairAsync();
@@ -218,6 +265,26 @@ public class ControlServerTests : IDisposable
         _devices.Remove("ipad-1");
 
         Assert.Equal(ControlServer.CloseRevoked, await ExpectCloseAsync(ws));
+    }
+
+    [Fact]
+    public async Task RemovedDeviceThatNeverAnswersIsReleasedAfterTwoSeconds()
+    {
+        var (ws, _) = await PairAsync();
+        var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _server.ConnectionsChanged += () =>
+        {
+            if (_server.Connected.Count == 0)
+                released.TrySetResult();
+        };
+
+        _devices.Remove("ipad-1");
+
+        // O app não lê o 4001 nem responde nada: sem o prazo, a conexão ficaria na lista,
+        // segurando uma das 4 vagas, até o TCP cair.
+        Assert.Same(released.Task, await Task.WhenAny(released.Task, Task.Delay(4000)));
+        Assert.Empty(_server.Connected);
+        GC.KeepAlive(ws);
     }
 
     [Fact]
@@ -416,5 +483,77 @@ public class ControlServerTests : IDisposable
         var device = Assert.Single(_server.Connected);
         Assert.Equal("iPad de teste", device.DeviceName);
         Assert.True(device.Paired);
+    }
+
+    [Fact]
+    public async Task NothingRunsOnTheCallersSynchronizationContext()
+    {
+        // No app, Start, Stop e a remoção do aparelho vêm da thread do WPF. Se o servidor
+        // iniciasse trabalho assíncrono no contexto de quem chama, accept, recepção, Handle,
+        // gravação do paired-devices.json e o envio de state cairiam todos no Dispatcher.
+        var ui = new CountingSyncContext();
+        RunOn(ui, () => _server.Start(0));   // o Start também passa pelo Stop do servidor já de pé
+        Assert.True(_server.IsRunning, _server.LastError ?? "servidor não subiu");
+
+        var (ws, _) = await PairAsync();
+        await SendAsync(ws, """{"type":"set","id":"a1","control":"com1.standby","value":118500000}""");
+        await ExpectAsync(ws, "result");
+        _sim.RaiseChanged();
+        await ExpectAsync(ws, "state");
+
+        RunOn(ui, () => _devices.Remove("ipad-1"));
+        Assert.Equal(ControlServer.CloseRevoked, await ExpectCloseAsync(ws));
+        await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
+        await WaitForNoConnectionsAsync();
+
+        var other = await ConnectAsync();
+        await SendAsync(other, Hello);
+        await ExpectAsync(other, "pairing_required");
+        RunOn(ui, () => _server.Stop());
+        Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await ExpectCloseAsync(other));
+        await other.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
+        await WaitForNoConnectionsAsync();
+
+        Assert.Equal(0, ui.Posts);
+    }
+
+    private static void RunOn(SynchronizationContext context, Action action)
+    {
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            action();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+
+    /// <summary>
+    /// Imita o Dispatcher: conta cada Post e roda o trabalho no pool com o próprio contexto
+    /// instalado, como a thread da interface faria. Uma continuação que caia nele uma vez
+    /// continua caindo, e tudo aparece na contagem.
+    /// </summary>
+    private sealed class CountingSyncContext : SynchronizationContext
+    {
+        private int _posts;
+
+        public int Posts => Volatile.Read(ref _posts);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _posts);
+            ThreadPool.QueueUserWorkItem(_ => RunOn(this, () => d(state)));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _posts);
+            RunOn(this, () => d(state));
+        }
+
+        public override SynchronizationContext CreateCopy() => this;
     }
 }

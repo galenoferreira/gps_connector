@@ -95,9 +95,13 @@ public sealed class ControlServer : IDisposable
             Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             _listener = listener;
             _cancellation = new CancellationTokenSource();
+            var token = _cancellation.Token;
             LastError = null;
-            _ = AcceptLoopAsync(listener, _cancellation.Token);
-            _ = PushLoopAsync(listener, _cancellation.Token);
+            // Quem chama é a thread da interface. Iniciados direto, os laços capturariam o
+            // contexto dela, e accept, recepção, Handle, gravação dos aparelhos e o envio de
+            // state rodariam todos no Dispatcher. O Task.Run os põe no pool desde o começo.
+            _ = Task.Run(() => AcceptLoopAsync(listener, token));
+            _ = Task.Run(() => PushLoopAsync(listener, token));
         }
         catch (SocketException ex)
         {
@@ -129,8 +133,12 @@ public sealed class ControlServer : IDisposable
         // Nada espera aqui (quem chama é a thread da interface): o Task.Run tira os fechamentos
         // do contexto dela, e o cancelamento vem quando o laço de recepção de cada uma recebeu
         // o Close do app e a soltou, ou em 2 s, o que vier antes (um app que não responde, ou
-        // um envio travado, que segura o lock de envio até o cancelamento).
+        // um envio travado, que segura o lock de envio até o cancelamento). A marca de
+        // fechamento vem antes, aqui mesmo: um quadro que chegue enquanto o 1000 ainda não saiu
+        // também não vira comando.
         var connections = _connections.Keys.ToArray();
+        foreach (var connection in connections)
+            connection.MarkClosing();
         var closing = Task.Run(async () =>
         {
             await Task.WhenAll(connections.Select(
@@ -148,8 +156,29 @@ public sealed class ControlServer : IDisposable
 
     private void OnDeviceRemoved(string deviceId)
     {
+        // Quem chama é o botão Remover da interface: o fechamento e o prazo rodam no pool.
+        // A marca vem antes, aqui mesmo, para que um quadro que chegue enquanto o 4001 ainda
+        // não saiu também não vire comando.
         foreach (var connection in _connections.Keys.Where(c => c.Session.DeviceId == deviceId))
-            _ = connection.CloseAsync((WebSocketCloseStatus)CloseRevoked, "aparelho removido");
+        {
+            connection.MarkClosing();
+            _ = Task.Run(() => RevokeAsync(connection));
+        }
+    }
+
+    /// <summary>
+    /// Manda o 4001 e dá ao app o mesmo prazo do <see cref="Stop"/> para responder. Um app que
+    /// não responde nem manda quadro deixa o laço de recepção parado no ReceiveAsync, e a
+    /// conexão seguraria uma das 4 vagas até o TCP cair: passado o prazo, o socket é abortado,
+    /// a leitura pendente falha e o laço solta a conexão.
+    /// </summary>
+    private async Task RevokeAsync(Connection connection)
+    {
+        var closing = connection.CloseAsync((WebSocketCloseStatus)CloseRevoked, "aparelho removido");
+        await Task.WhenAny(connection.Finished, Task.Delay(CloseTimeout));
+        if (_connections.ContainsKey(connection))
+            connection.Socket.Abort();
+        await closing;   // o abort também solta um envio travado que segurava o lock do fechamento
     }
 
     private void RaiseConnectionsChanged()
@@ -336,11 +365,12 @@ public sealed class ControlServer : IDisposable
                 return;
             }
 
-            if (connection.Socket.State != WebSocketState.Open)
+            if (connection.Closing || connection.Socket.State != WebSocketState.Open)
             {
-                // O servidor já mandou o fechamento (Stop, aparelho removido) e este quadro saiu
-                // do app antes de ele o ver: não vira comando, senão o set de um aparelho removido
-                // chegaria ao simulador. Descarta até o Close do app, por no máximo 2 s.
+                // O servidor já decidiu fechar (Stop, aparelho removido) e este quadro saiu do
+                // app antes de ele ver o fechamento: não vira comando, senão o set de um aparelho
+                // removido chegaria ao simulador. Descarta até o Close do app, por no máximo 2 s,
+                // mesmo que o quadro de fechamento ainda esteja saindo numa tarefa do pool.
                 await connection.DrainAsync();
                 return;
             }
@@ -430,8 +460,18 @@ public sealed class ControlServer : IDisposable
     {
         private readonly SemaphoreSlim _sendLock = new(1, 1);
         private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private volatile bool _closing;
 
         public WebSocket Socket { get; } = socket;
+
+        /// <summary>
+        /// O servidor decidiu fechar esta conexão (Stop, aparelho removido). Marcado por quem
+        /// chama, antes de o quadro de fechamento sair numa tarefa do pool: um quadro de dados
+        /// que chegue nessa janela também não vira comando.
+        /// </summary>
+        public bool Closing => _closing;
+
+        public void MarkClosing() => _closing = true;
 
         public ControlSession Session { get; } = session;
 
@@ -506,14 +546,18 @@ public sealed class ControlServer : IDisposable
             await DrainAsync();
         }
 
-        /// <summary>Com o fechamento já enviado, descarta o que chegar até o Close do app, por no máximo 2 s.</summary>
+        /// <summary>
+        /// Com o fechamento decidido, descarta o que chegar até o Close do app, por no máximo 2 s.
+        /// Lê também com o estado ainda Open: no Stop e na remoção o quadro de fechamento sai
+        /// numa tarefa do pool e pode não ter sido escrito quando o laço de recepção chega aqui.
+        /// </summary>
         public async Task DrainAsync()
         {
             var discard = new byte[1024];
             using var timeout = new CancellationTokenSource(CloseTimeout);
             try
             {
-                while (Socket.State == WebSocketState.CloseSent)
+                while (Socket.State is WebSocketState.Open or WebSocketState.CloseSent)
                 {
                     var received = await Socket.ReceiveAsync(discard.AsMemory(), timeout.Token);
                     if (received.MessageType == WebSocketMessageType.Close)
