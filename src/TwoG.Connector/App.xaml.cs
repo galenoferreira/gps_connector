@@ -19,6 +19,11 @@ public partial class App : Application
     private XgpsBroadcaster? _broadcaster;
     private FlightPlanServer? _flightPlanServer;
     private EfbDiscoveryService? _discovery;
+    private UpdateService? _updates;
+    private bool _userExit;
+    private bool _updateLaunched;
+
+    internal UpdateService? Updates => _updates;
 
     /// <summary>
     /// Isolado e sem inline de propósito: o JIT deste método é o primeiro ponto que
@@ -62,7 +67,17 @@ public partial class App : Application
             string.Equals(a, "-minimized", StringComparison.OrdinalIgnoreCase)
             || string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
 
+        var updatedArg = e.Args.Any(a =>
+            string.Equals(a, UpdateInstaller.UpdatedArg, StringComparison.OrdinalIgnoreCase));
+
         _singleInstanceMutex = new Mutex(true, MutexName, out var isFirstInstance);
+        if (!isFirstInstance && updatedArg)
+        {
+            // Relançado pelo updater: a versão anterior está saindo agora. Espera o
+            // mutex em vez de sair como segunda instância.
+            isFirstInstance = WaitForMutex(_singleInstanceMutex, TimeSpan.FromSeconds(10));
+        }
+
         if (!isFirstInstance)
         {
             // Já existe uma instância. Se o relançamento foi deliberado (usuário),
@@ -85,6 +100,18 @@ public partial class App : Application
 
         var settingsService = new SettingsService();
         var settings = settingsService.Load();
+
+        UpdateInstaller.CleanupAfterUpdate(Environment.ProcessPath);
+        _updates = UpdateService.Create(settings);
+
+        // Momento seguro nº 1: antes de o simulador conectar não há voo a interromper.
+        if (_updates.TryApply(UpdateTrigger.Startup, inFlight: false, RelaunchArgs(e.Args),
+                              relaunch: true, ReleaseSingleInstance))
+        {
+            _updateLaunched = true;
+            Shutdown();
+            return;
+        }
 
         // Extrai as DLLs do SimConnect (recursos embutidos) antes de tocar em
         // qualquer tipo do SimConnect.
@@ -119,6 +146,7 @@ public partial class App : Application
         _sim.Start();
         _discovery.Start();
         _broadcaster.Start();
+        _updates.Start();
 
         // Auto-reparo do auto-start: updates do MSFS às vezes apagam o EXE.xml.
         if (settings.StartWithSim)
@@ -194,13 +222,70 @@ public partial class App : Application
         }
     }
 
+    private static bool WaitForMutex(Mutex mutex, TimeSpan timeout)
+    {
+        try
+        {
+            return mutex.WaitOne(timeout);
+        }
+        catch (AbandonedMutexException)
+        {
+            return true;    // a anterior saiu sem liberar: agora é nosso
+        }
+    }
+
+    /// <summary>Argumentos para reabrir o app depois de atualizar, sem o marcador do updater.</summary>
+    private static string[] RelaunchArgs(IEnumerable<string> args) =>
+        args.Where(a => !string.Equals(a, UpdateInstaller.UpdatedArg, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+    /// <summary>Solta o mutex de instância única. Idempotente.</summary>
+    internal void ReleaseSingleInstance()
+    {
+        try
+        {
+            _singleInstanceMutex?.ReleaseMutex();
+        }
+        catch (ApplicationException)
+        {
+            // Não éramos donos (ex.: segunda instância saindo).
+        }
+        _singleInstanceMutex?.Dispose();
+        _singleInstanceMutex = null;
+    }
+
+    /// <summary>Encerramento pedido pelo piloto (menu Sair ou fechar sem bandeja).</summary>
+    internal void BeginUserExit() => _userExit = true;
+
+    /// <summary>Botão "Atualizar agora". Devolve false se não iniciou a instalação.</summary>
+    internal bool ApplyUpdateNow(bool inFlight, Func<bool> confirmInFlight)
+    {
+        if (_updates is null)
+            return false;
+        var args = RelaunchArgs(Environment.GetCommandLineArgs().Skip(1));
+        if (!_updates.TryApply(UpdateTrigger.Manual, inFlight, args, relaunch: true,
+                               ReleaseSingleInstance, confirmInFlight))
+            return false;
+
+        _updateLaunched = true;
+        Shutdown();
+        return true;
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         _flightPlanServer?.Dispose();
         _broadcaster?.Dispose();
         _discovery?.Dispose();
         _sim?.Dispose();
-        _singleInstanceMutex?.Dispose();
+
+        // Momento seguro nº 2: o piloto mandou encerrar. Instala sem reabrir. Logoff
+        // e desligamento do Windows não passam por BeginUserExit, e não instalam.
+        if (_userExit && !_updateLaunched)
+            _updates?.TryApply(UpdateTrigger.Exit, inFlight: false, [], relaunch: false, ReleaseSingleInstance);
+
+        _updates?.Dispose();
+        ReleaseSingleInstance();
         base.OnExit(e);
     }
 }

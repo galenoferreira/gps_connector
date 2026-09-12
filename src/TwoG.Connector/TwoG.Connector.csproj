@@ -38,6 +38,15 @@
   </ItemGroup>
 
   <!--
+    Canal do updater, injetado pelo CI só em builds de tag (-p:UpdateChannel=stable).
+    Sem ele o updater fica desligado: um build local ou de branch não pode se
+    "atualizar" para o último release na primeira oportunidade.
+  -->
+  <ItemGroup Condition="'$(UpdateChannel)' != ''">
+    <AssemblyMetadata Include="UpdateChannel" Value="$(UpdateChannel)" />
+  </ItemGroup>
+
+  <!--
     DLLs oficiais do SimConnect (MSFS SDK 0.24.3.0), vendorizadas em /libs — não há
     pacote NuGet oficial. Um cliente da era 2020 conecta ao MSFS 2020 E 2024
     (confirmado pela Asobo). Mesma arquitetura do fs2ff.

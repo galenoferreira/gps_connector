@@ -33,5 +33,8 @@ public sealed class AppSettings
     /// <summary>Fechar a janela envia o app para a bandeja em vez de encerrar.</summary>
     public bool CloseToTray { get; set; } = true;
 
+    /// <summary>Verificar, baixar e instalar atualizações sozinho — sempre fora de voo.</summary>
+    public bool AutoUpdate { get; set; } = true;
+
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
 }

@@ -104,6 +104,10 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; ou em modo silencioso, o simulador deixaria de lançar o conector.
 Filename: "{app}\{#MyAppExeName}"; Parameters: "-register"; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppShortName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Reabre o conector depois de uma atualização silenciosa feita pelo updater, com
+; os argumentos que ele tinha (-minimized quando lançado pelo MSFS). O updater
+; passa /norelaunch=1 quando o piloto mandou encerrar.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "{param:relaunchargs|}"; Flags: nowait skipifnotsilent; Check: ShouldRelaunch
 
 [UninstallRun]
 ; Remove nossas entradas Launch.Addon dos EXE.xml de todas as edições do MSFS.
@@ -132,6 +136,11 @@ begin
     Result := ExpandConstant('{cm:DetectFound}') + #13#10 + #13#10 + Result
   else
     Result := ExpandConstant('{cm:DetectNone}');
+end;
+
+function ShouldRelaunch(): Boolean;
+begin
+  Result := ExpandConstant('{param:norelaunch|0}') <> '1';
 end;
 
 procedure InitializeWizard();

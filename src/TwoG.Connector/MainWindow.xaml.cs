@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     /// <summary>Encerramento real (menu Sair): não intercepta o Closing.</summary>
     public void ExitApplication()
     {
+        ((App)Application.Current).BeginUserExit();
         _exiting = true;
         TrayIcon.Dispose();
         Application.Current.Shutdown();
@@ -61,6 +62,7 @@ public partial class MainWindow : Window
         base.OnClosing(e);
         if (!_exiting)
         {
+            ((App)Application.Current).BeginUserExit();
             TrayIcon.Dispose();
             Application.Current.Shutdown();
         }
