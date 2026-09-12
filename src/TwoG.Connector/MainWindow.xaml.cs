@@ -46,6 +46,15 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        // Atualização iniciada ou fim da sessão do Windows: o Shutdown do WPF passa
+        // por aqui e ignora o cancelamento. Fecha de verdade, sem bandeja, sem aviso
+        // e sem marcar saída do piloto.
+        if (!_exiting && ((App)Application.Current).IsClosingWithoutUser)
+        {
+            _exiting = true;
+            TrayIcon.Dispose();
+        }
+
         if (!_exiting && Vm?.CloseToTray == true)
         {
             e.Cancel = true;

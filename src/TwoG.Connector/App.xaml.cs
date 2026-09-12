@@ -22,8 +22,16 @@ public partial class App : Application
     private UpdateService? _updates;
     private bool _userExit;
     private bool _updateLaunched;
+    private bool _sessionEnding;
 
     internal UpdateService? Updates => _updates;
+
+    /// <summary>
+    /// Encerramento que não veio do piloto: atualização iniciada ou fim da sessão do
+    /// Windows. O Shutdown do WPF dispara o Closing da janela mesmo assim; ela não
+    /// deve ir para a bandeja nem marcar saída do piloto.
+    /// </summary>
+    internal bool IsClosingWithoutUser => _updateLaunched || _sessionEnding;
 
     /// <summary>
     /// Isolado e sem inline de propósito: o JIT deste método é o primeiro ponto que
@@ -46,6 +54,10 @@ public partial class App : Application
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             ReportFatal(args.ExceptionObject as Exception);
+
+        // Logoff/desligamento: o WPF chama Shutdown depois deste evento, e o Windows
+        // pode matar o processo no meio de uma instalação. Nunca instala aqui.
+        SessionEnding += (_, _) => _sessionEnding = true;
 
         // Chamado pelo desinstalador: remove nossas entradas dos EXE.xml e sai.
         if (e.Args.Any(a => string.Equals(a, "-unregister", StringComparison.OrdinalIgnoreCase)))
@@ -280,8 +292,8 @@ public partial class App : Application
         _sim?.Dispose();
 
         // Momento seguro nº 2: o piloto mandou encerrar. Instala sem reabrir. Logoff
-        // e desligamento do Windows não passam por BeginUserExit, e não instalam.
-        if (_userExit && !_updateLaunched)
+        // e desligamento do Windows não instalam (_sessionEnding, via SessionEnding).
+        if (_userExit && !_updateLaunched && !_sessionEnding)
             _updates?.TryApply(UpdateTrigger.Exit, inFlight: false, [], relaunch: false, ReleaseSingleInstance);
 
         _updates?.Dispose();
