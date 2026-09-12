@@ -115,7 +115,9 @@ public partial class MainViewModel : ObservableObject
 
     public ObservableCollection<PairedDeviceItem> PairedDevices { get; } = [];
 
-    private string _devicesSignature = "";
+    // null = "reconstruir no próximo Refresh". Não pode ser "": é a assinatura da lista vazia,
+    // e remover o último aparelho não limparia a lista.
+    private string? _devicesSignature;
 
     // ── Configurações (campos de edição) ────────────────────────────────
     [ObservableProperty] private string _deviceNameInput = "";
@@ -531,7 +533,7 @@ public partial class MainViewModel : ObservableObject
             return;
 
         _control.Devices.Remove(deviceId);   // derruba a conexão dele com 4001
-        _devicesSignature = "";
+        _devicesSignature = null;
         Refresh();
     }
 

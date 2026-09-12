@@ -21,6 +21,23 @@ public partial class MainWindow : Window
         // passaria da tela num notebook (1366x768 a 100%, 1080p a 125%) e o fim — Diagnóstico,
         // Configurações, Aplicar — ficaria inalcançável. Com ele, o ScrollViewer rola o resto.
         MaxHeight = SystemParameters.WorkArea.Height;
+        SizeChanged += (_, _) => KeepBottomInWorkArea();
+    }
+
+    /// <summary>
+    /// O SizeToContent cresce a janela para baixo mantendo o Top (da abertura centralizada):
+    /// ao expandir Configurações/Diagnóstico o fim — com o Aplicar — iria para trás da barra
+    /// de tarefas. Sobe a janela o necessário. Só no monitor principal, o mesmo do MaxHeight.
+    /// </summary>
+    private void KeepBottomInWorkArea()
+    {
+        if (WindowState != WindowState.Normal || double.IsNaN(Top) || double.IsNaN(Left))
+            return;
+
+        var area = SystemParameters.WorkArea;
+        var onPrimary = Left < area.Right && Left + ActualWidth > area.Left && Top < area.Bottom;
+        if (onPrimary && Top + ActualHeight > area.Bottom)
+            Top = Math.Max(area.Top, area.Bottom - ActualHeight);
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
