@@ -36,5 +36,11 @@ public sealed class AppSettings
     /// <summary>Verificar, baixar e instalar atualizações sozinho — sempre fora de voo.</summary>
     public bool AutoUpdate { get; set; } = true;
 
+    /// <summary>Aceitar comandos do 2G Pilot pelo canal de controle. Desligado, a porta nem abre.</summary>
+    public bool AllowControl { get; set; } = true;
+
+    /// <summary>Porta TCP do canal de controle (WebSocket).</summary>
+    public int ControlPort { get; set; } = 49004;
+
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
 }

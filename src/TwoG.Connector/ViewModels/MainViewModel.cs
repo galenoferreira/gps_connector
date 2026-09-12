@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -23,6 +24,7 @@ public partial class MainViewModel : ObservableObject
     private readonly FlightPlanServer _flightPlanServer;
     private readonly IEfbDiscovery? _discovery;
     private readonly UpdateService? _updates;
+    private readonly ControlService? _control;
     private readonly DispatcherTimer _uiTimer;
     private readonly DispatcherTimer _feedbackTimer;
 
@@ -30,7 +32,8 @@ public partial class MainViewModel : ObservableObject
                          SettingsService settingsService, AppSettings settings,
                          FlightPlanServer flightPlanServer,
                          IEfbDiscovery? discovery = null,
-                         UpdateService? updates = null)
+                         UpdateService? updates = null,
+                         ControlService? control = null)
     {
         _sim = sim;
         _broadcaster = broadcaster;
@@ -39,6 +42,7 @@ public partial class MainViewModel : ObservableObject
         _flightPlanServer = flightPlanServer;
         _discovery = discovery;
         _updates = updates;
+        _control = control;
 
         LoadSettingsIntoInputs();
 
@@ -98,6 +102,21 @@ public partial class MainViewModel : ObservableObject
 
     public string DownloadPageUrl => ProductIdentity.LatestReleasePageUrl;
 
+    // ── Controle pelo 2G Pilot ──────────────────────────────────────────
+    [ObservableProperty] private string _controlStatusText = "";
+    [ObservableProperty] private Brush _controlStatusBrush = Dim;
+    [ObservableProperty] private string _controlDetail = "";
+    [ObservableProperty] private string _pairingCodeText = "";
+    [ObservableProperty] private string _pairingCountdownText = "";
+    [ObservableProperty] private bool _hasPairingCode;
+    [ObservableProperty] private bool _canStartPairing;
+    [ObservableProperty] private bool _hasPairedDevices;
+    [ObservableProperty] private string _diagControl = "—";
+
+    public ObservableCollection<PairedDeviceItem> PairedDevices { get; } = [];
+
+    private string _devicesSignature = "";
+
     // ── Configurações (campos de edição) ────────────────────────────────
     [ObservableProperty] private string _deviceNameInput = "";
     [ObservableProperty] private string _portInput = "";
@@ -108,6 +127,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _startMinimizedInput;
     [ObservableProperty] private bool _closeToTrayInput;
     [ObservableProperty] private bool _autoUpdateInput;
+    [ObservableProperty] private bool _allowControlInput;
+    [ObservableProperty] private string _controlPortInput = "";
     [ObservableProperty] private bool _canSyncFlightPlan;
     [ObservableProperty] private string _flightPlanFeedback = "";
     [ObservableProperty] private Brush _flightPlanFeedbackBrush = Dim;
@@ -128,6 +149,8 @@ public partial class MainViewModel : ObservableObject
         StartMinimizedInput = _settings.StartMinimized;
         CloseToTrayInput = _settings.CloseToTray;
         AutoUpdateInput = _settings.AutoUpdate;
+        AllowControlInput = _settings.AllowControl;
+        ControlPortInput = _settings.ControlPort.ToString(CultureInfo.InvariantCulture);
     }
 
     private int _refreshTick;
@@ -238,6 +261,7 @@ public partial class MainViewModel : ObservableObject
 
         UpdateDiagnostics();
         UpdateUpdaterStatus();
+        UpdateControlStatus();
 
         var fix = _sim.LatestFix;
         if (fix is not null)
@@ -287,7 +311,7 @@ public partial class MainViewModel : ObservableObject
         var sendError = _broadcaster.LastSendError;
         var discoveryError = _discovery?.LastError;
         DiagLastError = string.Join("  •  ",
-            new[] { sendError, discoveryError, _updates?.LastError }.Where(e => e is { Length: > 0 }));
+            new[] { sendError, discoveryError, _updates?.LastError, _control?.Server.LastError }.Where(e => e is { Length: > 0 }));
         HasDiagError = DiagLastError.Length > 0;
 
         UpdateDiscovery();
@@ -400,6 +424,112 @@ public partial class MainViewModel : ObservableObject
             : "ainda não verificado";
         var seen = latest is not null ? $"  •  mais recente: v{latest}" : "";
         DiagUpdate = $"v{updates.CurrentVersion}  •  {check}{seen}{failed}";
+    }
+
+    /// <summary>Card "Controle pelo 2G Pilot" e linha no Diagnóstico.</summary>
+    private void UpdateControlStatus()
+    {
+        var control = _control;
+        if (control is null)
+        {
+            ControlStatusText = "Indisponível neste simulador";
+            ControlStatusBrush = Dim;
+            CanStartPairing = HasPairingCode = false;
+            return;
+        }
+
+        if (!_settings.AllowControl)
+        {
+            ControlStatusText = "Desligado nas Configurações";
+            ControlStatusBrush = Dim;
+            ControlDetail = "";
+            DiagControl = "desligado";
+        }
+        else if (!control.Server.IsRunning)
+        {
+            ControlStatusText = "Canal de controle indisponível";
+            ControlStatusBrush = Err;
+            ControlDetail = control.Server.LastError ?? "";
+            DiagControl = control.Server.LastError ?? "servidor parado";
+        }
+        else
+        {
+            var paired = control.Server.Connected.Where(c => c.Paired).ToArray();
+            ControlStatusText = paired.Length switch
+            {
+                0 => "Aguardando aparelho",
+                1 => $"1 aparelho conectado: {paired[0].DeviceName}",
+                var n => $"{n} aparelhos conectados",
+            };
+            ControlStatusBrush = paired.Length > 0 ? Ok : Warn;
+            ControlDetail = $"TCP {control.Server.Port} • anúncio 2GCTL na UDP {_settings.Port}";
+            DiagControl = $"conexões {control.Server.Connected.Count}"
+                          + (control.Server.LastCommand is { } last ? $"  •  último comando: {last}" : "");
+        }
+
+        var active = control.Codes.Active;
+        HasPairingCode = active is not null;
+        if (active is { } code)
+        {
+            PairingCodeText = $"{code.Code[..3]} {code.Code[3..]}";
+            PairingCountdownText = $"expira em {Math.Max(0, (int)(code.ExpiresUtc - DateTime.UtcNow).TotalSeconds)} s";
+        }
+        CanStartPairing = _settings.AllowControl && control.Server.IsRunning && !HasPairingCode;
+
+        RefreshPairedDevices(control);
+    }
+
+    /// <summary>Recria a lista só quando algo mudou: a cada 250 ms seria piscar a tela à toa.</summary>
+    private void RefreshPairedDevices(ControlService control)
+    {
+        var connected = control.Server.Connected.Where(c => c.Paired).Select(c => c.DeviceId).ToHashSet();
+        var items = control.Devices.Devices
+            .OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(d => new PairedDeviceItem(d.Id, d.Name,
+                connected.Contains(d.Id) ? "conectado agora" : $"último acesso {d.LastSeenUtc.ToLocalTime():dd/MM HH:mm}"))
+            .ToArray();
+
+        var signature = string.Join("|", items.Select(i => $"{i.Id}:{i.Name}:{i.Detail}"));
+        if (signature == _devicesSignature)
+            return;
+        _devicesSignature = signature;
+
+        PairedDevices.Clear();
+        foreach (var item in items)
+            PairedDevices.Add(item);
+        HasPairedDevices = items.Length > 0;
+    }
+
+    [RelayCommand]
+    private void StartPairing()
+    {
+        _control?.Codes.Generate();
+        Refresh();
+    }
+
+    [RelayCommand]
+    private void CancelPairing()
+    {
+        _control?.Codes.Cancel();
+        Refresh();
+    }
+
+    [RelayCommand]
+    private void RemoveDevice(string? deviceId)
+    {
+        if (_control is null || deviceId is null)
+            return;
+
+        var name = _control.Devices.Devices.FirstOrDefault(d => d.Id == deviceId)?.Name ?? "este aparelho";
+        var answer = System.Windows.MessageBox.Show(
+            $"Remover \"{name}\"? Ele deixa de controlar o simulador e precisa parear de novo.",
+            ProductIdentity.Name, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question);
+        if (answer != System.Windows.MessageBoxResult.Yes)
+            return;
+
+        _control.Devices.Remove(deviceId);   // derruba a conexão dele com 4001
+        _devicesSignature = "";
+        Refresh();
     }
 
     private static string FormatElapsed(TimeSpan span) =>
@@ -572,6 +702,13 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        if (!int.TryParse(ControlPortInput.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var controlPort)
+            || controlPort is < 1 or > 65535 || controlPort == _settings.FlightPlanPort)
+        {
+            ShowFeedback("Porta do controle inválida (1–65535, diferente da do plano de voo).", isError: true);
+            return;
+        }
+
         var device = XgpsSentences.SanitizeDeviceName(DeviceNameInput);
         if (device.Length == 0)
         {
@@ -599,9 +736,12 @@ public partial class MainViewModel : ObservableObject
         _settings.CloseToTray = CloseToTrayInput;
         var autoUpdateTurnedOn = AutoUpdateInput && !_settings.AutoUpdate;
         _settings.AutoUpdate = AutoUpdateInput;
+        _settings.AllowControl = AllowControlInput;
+        _settings.ControlPort = controlPort;
 
         _settingsService.Save(_settings);
         _broadcaster.UpdateSettings(_settings);
+        _control?.Apply();
         DeviceNameInput = device;
 
         // O timer do UpdateService só volta a verificar em até 6 h, e a verificação
@@ -654,3 +794,6 @@ public partial class MainViewModel : ObservableObject
         _feedbackTimer.Start();
     }
 }
+
+/// <summary>Uma linha da lista de aparelhos pareados.</summary>
+public sealed record PairedDeviceItem(string Id, string Name, string Detail);

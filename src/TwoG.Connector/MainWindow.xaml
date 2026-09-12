@@ -23,6 +23,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Ícone de bandeja -->
@@ -168,13 +169,71 @@
             </StackPanel>
         </Border>
 
-        <!-- ══ Diagnóstico ══ -->
+        <!-- ══ Controle pelo 2G Pilot ══ -->
         <Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="CONTROLE PELO 2G PILOT" Style="{StaticResource SectionTitle}" Margin="0,0,0,8" />
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="10" Height="10" Fill="{Binding ControlStatusBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ControlStatusText}" FontSize="14.5" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}" Margin="9,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="{Binding ControlDetail}" FontSize="11.5" TextWrapping="Wrap"
+                           Foreground="{StaticResource DimBrush}" Margin="19,3,0,0" />
+
+                <!-- Só enquanto existe um código de pareamento -->
+                <Border Background="{StaticResource InputBrush}" CornerRadius="10" Padding="14,10" Margin="0,12,0,0"
+                        Visibility="{Binding HasPairingCode, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="Digite este código no 2G Pilot" FontSize="11.5" Foreground="{StaticResource DimBrush}" />
+                        <TextBlock Text="{Binding PairingCodeText}" FontSize="30" FontWeight="Bold" FontFamily="Consolas"
+                                   Foreground="{StaticResource AccentBrush}" Margin="0,4,0,0" />
+                        <Grid Margin="0,4,0,0">
+                            <TextBlock Text="{Binding PairingCountdownText}" FontSize="11.5"
+                                       Foreground="{StaticResource DimBrush}" VerticalAlignment="Center" />
+                            <Button Content="Cancelar" Command="{Binding CancelPairingCommand}"
+                                    HorizontalAlignment="Right" Padding="10,3" FontSize="11.5" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Button Content="Parear aparelho" Command="{Binding StartPairingCommand}"
+                        IsEnabled="{Binding CanStartPairing}" HorizontalAlignment="Left"
+                        Margin="19,12,0,0" Padding="14,7" FontSize="12" />
+
+                <ItemsControl ItemsSource="{Binding PairedDevices}" Margin="19,10,0,0"
+                              Visibility="{Binding HasPairedDevices, Converter={StaticResource BoolToVisibility}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontSize="12.5" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{StaticResource DimBrush}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="Remover" Padding="10,3" FontSize="11" VerticalAlignment="Center"
+                                        Command="{Binding DataContext.RemoveDeviceCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        CommandParameter="{Binding Id}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <!-- ══ Diagnóstico ══ -->
+        <Border Grid.Row="5" Style="{StaticResource Card}" Margin="0,0,0,10">
             <Expander>
                 <Expander.Header>
                     <TextBlock Text="DIAGNÓSTICO" Style="{StaticResource SectionTitle}" />
                 </Expander.Header>
                 <StackPanel Margin="2,12,2,2">
+                    <TextBlock Text="CONTROLE" Style="{StaticResource ValueLabel}" />
+                    <TextBlock Text="{Binding DiagControl}" FontSize="11.5" TextWrapping="Wrap"
+                               Foreground="{StaticResource DimBrush}" Margin="0,3,0,12" />
                     <TextBlock Text="ATUALIZAÇÃO" Style="{StaticResource ValueLabel}" />
                     <TextBlock Text="{Binding DiagUpdate}" FontSize="11.5" TextWrapping="Wrap"
                                Foreground="{StaticResource DimBrush}" Margin="0,3,0,12" />
@@ -214,7 +273,7 @@
         </Border>
 
         <!-- ══ Configurações ══ -->
-        <Border Grid.Row="5" Style="{StaticResource Card}" Margin="0,0,0,12">
+        <Border Grid.Row="6" Style="{StaticResource Card}" Margin="0,0,0,12">
             <Expander>
                 <Expander.Header>
                     <TextBlock Text="CONFIGURAÇÕES" Style="{StaticResource SectionTitle}" />
@@ -257,6 +316,11 @@
                     </StackPanel>
                     <CheckBox Content="Atualizar automaticamente (sempre fora de voo)"
                               IsChecked="{Binding AutoUpdateInput}" Margin="0,8,0,0" />
+                    <CheckBox Content="Permitir controle pelo 2G Pilot"
+                              IsChecked="{Binding AllowControlInput}" Margin="0,8,0,0" />
+                    <TextBlock Text="Porta do controle (TCP)" Style="{StaticResource ValueLabel}" Margin="0,10,0,4" />
+                    <TextBox Text="{Binding ControlPortInput, UpdateSourceTrigger=PropertyChanged}"
+                             Width="120" HorizontalAlignment="Left" />
 
                     <Grid Margin="0,14,0,0">
                         <TextBlock Text="{Binding SettingsFeedback}" Foreground="{Binding SettingsFeedbackBrush}"
@@ -268,7 +332,7 @@
         </Border>
 
         <!-- ══ Rodapé ══ -->
-        <TextBlock Grid.Row="6" Text="{Binding VersionText, Mode=OneTime}" FontSize="10.5"
+        <TextBlock Grid.Row="7" Text="{Binding VersionText, Mode=OneTime}" FontSize="10.5"
                    Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Center" />
     </Grid>
 </Window>

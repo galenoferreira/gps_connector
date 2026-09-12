@@ -20,6 +20,7 @@ public partial class App : Application
     private FlightPlanServer? _flightPlanServer;
     private EfbDiscoveryService? _discovery;
     private UpdateService? _updates;
+    private ControlService? _control;
     private bool _userExit;
     private bool _updateLaunched;
     private bool _sessionEnding;
@@ -140,8 +141,10 @@ public partial class App : Application
         _broadcaster = new XgpsBroadcaster(_sim, settings, _discovery);
         _flightPlanServer = new FlightPlanServer();
         _flightPlanServer.Start(settings.FlightPlanPort);
+        if (_sim.Control is { } simControl)
+            _control = new ControlService(simControl, _broadcaster, settings, _updates.CurrentVersion.ToString());
         var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings,
-                                          _flightPlanServer, _discovery, _updates);
+                                          _flightPlanServer, _discovery, _updates, _control);
 
         var window = new MainWindow { DataContext = viewModel };
         MainWindow = window;
@@ -165,6 +168,7 @@ public partial class App : Application
         _sim.Start();
         _discovery.Start();
         _broadcaster.Start();
+        _control?.Apply();
         _updates.Start();
 
         // Auto-reparo do auto-start: updates do MSFS às vezes apagam o EXE.xml.
@@ -307,6 +311,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _flightPlanServer?.Dispose();
+        _control?.Dispose();
         _broadcaster?.Dispose();
         _discovery?.Dispose();
         _sim?.Dispose();
