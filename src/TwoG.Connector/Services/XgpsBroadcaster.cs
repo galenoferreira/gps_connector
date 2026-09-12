@@ -184,14 +184,21 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
         return fix.IsFinite ? fix : null;
     }
 
-    private void SendToAll(string sentence)
+    private void SendToAll(string sentence) => SendToEach(_ => sentence);
+
+    public void SendToEach(Func<IPEndPoint, string?> sentenceFor)
     {
         var udp = _udp;
-        if (udp is null) return;
+        if (udp is null)
+            return;
 
-        var payload = Encoding.ASCII.GetBytes(sentence);
         foreach (var endpoint in AllEndpoints())
         {
+            var sentence = sentenceFor(endpoint);
+            if (sentence is null)
+                continue;
+
+            var payload = Encoding.ASCII.GetBytes(sentence);
             try
             {
                 udp.Send(payload, payload.Length, endpoint);

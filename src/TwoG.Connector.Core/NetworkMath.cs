@@ -27,4 +27,42 @@ public static class NetworkMath
             broadcast[i] = (byte)(ip[i] | ~m[i]);
         return new IPAddress(broadcast);
     }
+
+    /// <summary>
+    /// IP da interface por onde <paramref name="destination"/> sai: a primeira cuja sub-rede
+    /// contém o destino (o broadcast dirigido pertence à própria sub-rede). Null quando
+    /// nenhuma contém — quem chama decide pela rota do sistema.
+    /// </summary>
+    public static IPAddress? SourceAddressFor(
+        IPAddress destination, IEnumerable<(IPAddress Address, IPAddress Mask)> interfaces)
+    {
+        if (destination.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+            return null;
+
+        var dest = destination.GetAddressBytes();
+        foreach (var (address, mask) in interfaces)
+        {
+            if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork
+                || mask.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                continue;
+
+            var a = address.GetAddressBytes();
+            var m = mask.GetAddressBytes();
+            if (m is [0, 0, 0, 0])
+                continue;
+
+            var sameNetwork = true;
+            for (var i = 0; i < 4; i++)
+            {
+                if ((a[i] & m[i]) != (dest[i] & m[i]))
+                {
+                    sameNetwork = false;
+                    break;
+                }
+            }
+            if (sameNetwork)
+                return address;
+        }
+        return null;
+    }
 }

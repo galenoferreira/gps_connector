@@ -1,3 +1,4 @@
+using System.Net;
 using TwoG.Connector.Configuration;
 
 namespace TwoG.Connector.Services;
@@ -34,4 +35,11 @@ public interface IXgpsBroadcaster : IDisposable
 
     /// <summary>Envia uma sentença avulsa imediatamente (ex.: anúncio de plano de voo).</summary>
     void SendNow(string sentence);
+
+    /// <summary>
+    /// Envia a cada destino atual uma sentença própria, montada por <paramref name="sentenceFor"/>.
+    /// Destino para o qual a função devolve null é pulado. Usado pelo anúncio 2GCTL, cujo
+    /// conteúdo depende da interface de saída.
+    /// </summary>
+    void SendToEach(Func<IPEndPoint, string?> sentenceFor);
 }
