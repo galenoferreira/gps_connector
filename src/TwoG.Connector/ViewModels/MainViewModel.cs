@@ -22,13 +22,15 @@ public partial class MainViewModel : ObservableObject
     private readonly AppSettings _settings;
     private readonly FlightPlanServer _flightPlanServer;
     private readonly IEfbDiscovery? _discovery;
+    private readonly UpdateService? _updates;
     private readonly DispatcherTimer _uiTimer;
     private readonly DispatcherTimer _feedbackTimer;
 
     public MainViewModel(ISimSource sim, IXgpsBroadcaster broadcaster,
                          SettingsService settingsService, AppSettings settings,
                          FlightPlanServer flightPlanServer,
-                         IEfbDiscovery? discovery = null)
+                         IEfbDiscovery? discovery = null,
+                         UpdateService? updates = null)
     {
         _sim = sim;
         _broadcaster = broadcaster;
@@ -36,6 +38,7 @@ public partial class MainViewModel : ObservableObject
         _settings = settings;
         _flightPlanServer = flightPlanServer;
         _discovery = discovery;
+        _updates = updates;
 
         LoadSettingsIntoInputs();
 
@@ -86,6 +89,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _hasDiscoveredApps;
     [ObservableProperty] private Brush _discoveryBrush = Dim;
 
+    // ── Atualização ─────────────────────────────────────────────────────
+    [ObservableProperty] private string _updateBannerText = "";
+    [ObservableProperty] private bool _hasUpdateBanner;
+    [ObservableProperty] private bool _canApplyUpdateNow;
+    [ObservableProperty] private string _diagUpdate = "—";
+
     // ── Configurações (campos de edição) ────────────────────────────────
     [ObservableProperty] private string _deviceNameInput = "";
     [ObservableProperty] private string _portInput = "";
@@ -95,6 +104,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _startWithSimInput;
     [ObservableProperty] private bool _startMinimizedInput;
     [ObservableProperty] private bool _closeToTrayInput;
+    [ObservableProperty] private bool _autoUpdateInput;
     [ObservableProperty] private bool _canSyncFlightPlan;
     [ObservableProperty] private string _flightPlanFeedback = "";
     [ObservableProperty] private Brush _flightPlanFeedbackBrush = Dim;
@@ -114,6 +124,7 @@ public partial class MainViewModel : ObservableObject
         StartWithSimInput = _settings.StartWithSim;
         StartMinimizedInput = _settings.StartMinimized;
         CloseToTrayInput = _settings.CloseToTray;
+        AutoUpdateInput = _settings.AutoUpdate;
     }
 
     private int _refreshTick;
@@ -223,6 +234,7 @@ public partial class MainViewModel : ObservableObject
         CanSyncFlightPlan = _sim.FlightPlans is { CanRead: true };
 
         UpdateDiagnostics();
+        UpdateUpdaterStatus();
 
         var fix = _sim.LatestFix;
         if (fix is not null)
@@ -272,7 +284,7 @@ public partial class MainViewModel : ObservableObject
         var sendError = _broadcaster.LastSendError;
         var discoveryError = _discovery?.LastError;
         DiagLastError = string.Join("  •  ",
-            new[] { sendError, discoveryError }.Where(e => e is { Length: > 0 }));
+            new[] { sendError, discoveryError, _updates?.LastError }.Where(e => e is { Length: > 0 }));
         HasDiagError = DiagLastError.Length > 0;
 
         UpdateDiscovery();
@@ -308,6 +320,114 @@ public partial class MainViewModel : ObservableObject
             var age = (int)Math.Max(0, (now - efb.LastSeenUtc).TotalSeconds);
             return $"{efb.Address}  —  {efb.AppName} ({how}, há {age}s)";
         }));
+    }
+
+    /// <summary>
+    /// Faixa abaixo do cabeçalho e linha no Diagnóstico. Leituras baratas: o serviço
+    /// guarda o estado em memória, sem I/O por tique.
+    /// </summary>
+    private void UpdateUpdaterStatus()
+    {
+        var updates = _updates;
+        if (updates is null || !updates.IsReleaseBuild)
+        {
+            HasUpdateBanner = false;
+            CanApplyUpdateNow = false;
+            DiagUpdate = "desligado neste build (só builds de release se atualizam)";
+            return;
+        }
+
+        var pending = updates.Pending;
+        var latest = updates.LatestSeen;
+        // Tentativas esgotadas: o TryApply não instala mais esta versão. Derivado da
+        // pendência gravada, não do LastError, que a próxima verificação zeraria. Vai
+        // para a faixa e, como o spec pede, para o Diagnóstico.
+        var exhausted = pending is not null && pending.IsFor(updates.Kind) && pending.AttemptsExhausted
+                        && !pending.IsStaleFor(updates.CurrentVersion)
+            ? pending
+            : null;
+
+        // Mesma regra do TryApply: só oferece o que esta cópia vai de fato instalar.
+        if (pending is not null && pending.CanBeInstalledBy(updates.Kind, updates.CurrentVersion))
+        {
+            HasUpdateBanner = true;
+            CanApplyUpdateNow = true;
+            // Desligada, o TryApply recusa Startup e Exit: só o botão instala.
+            UpdateBannerText = _settings.AutoUpdate
+                ? $"v{pending.Version} pronta — instala ao reiniciar"
+                : $"v{pending.Version} pronta — atualização automática desligada; use Atualizar agora";
+        }
+        else if (exhausted is not null)
+        {
+            HasUpdateBanner = true;
+            CanApplyUpdateNow = false;
+            UpdateBannerText = $"A instalação da v{exhausted.Version} falhou {exhausted.Attempts} vezes — baixe manualmente";
+        }
+        else if (updates.Kind == InstallKind.ReadOnly && latest is not null && latest > updates.CurrentVersion)
+        {
+            HasUpdateBanner = true;
+            CanApplyUpdateNow = false;
+            UpdateBannerText = $"v{latest} disponível — baixe manualmente (pasta do app sem permissão de escrita)";
+        }
+        else
+        {
+            HasUpdateBanner = false;
+            CanApplyUpdateNow = false;
+        }
+
+        // Vale nos dois ramos: as tentativas podem ter acabado antes de o piloto desligar a
+        // automática, ou pelo botão, que instala (e conta tentativa) mesmo com ela desligada.
+        var failed = exhausted is not null
+            ? $"  •  instalação da v{exhausted.Version} falhou {exhausted.Attempts} vezes"
+            : "";
+
+        if (!_settings.AutoUpdate)
+        {
+            DiagUpdate = $"v{updates.CurrentVersion}  •  atualização automática desligada{failed}";
+            return;
+        }
+
+        var check = updates.LastCheckUtc is { } at
+            ? $"verificado há {FormatElapsed(DateTime.UtcNow - at)}"
+            : "ainda não verificado";
+        var seen = latest is not null ? $"  •  mais recente: v{latest}" : "";
+        DiagUpdate = $"v{updates.CurrentVersion}  •  {check}{seen}{failed}";
+    }
+
+    private static string FormatElapsed(TimeSpan span) =>
+        span.TotalMinutes < 1 ? "menos de 1 min"
+        : span.TotalHours < 1 ? $"{(int)span.TotalMinutes} min"
+        : $"{(int)span.TotalHours} h";
+
+    [RelayCommand]
+    private void ApplyUpdateNow()
+    {
+        if (System.Windows.Application.Current is not App app)
+            return;
+
+        var inFlight = _sim.State == SimConnectionState.Receiving;
+        var pilotDeclined = false;
+        var started = app.ApplyUpdateNow(inFlight, confirmInFlight: () =>
+        {
+            var confirmed = System.Windows.MessageBox.Show(
+                "Você está em voo. O tablet fica sem posição por alguns segundos enquanto o "
+                + $"{ProductIdentity.Name} se atualiza.\n\nAtualizar agora?",
+                ProductIdentity.Name,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            pilotDeclined = !confirmed;
+            return confirmed;
+        });
+
+        // Caixa de mensagem, não texto na faixa: o próximo tique de 250 ms sobrescreveria
+        // a faixa. Se quem recusou foi o piloto (Não na confirmação de voo), não há falha
+        // a avisar — e o LastError estaria vazio.
+        if (!started && !pilotDeclined)
+            System.Windows.MessageBox.Show(
+                _updates?.LastError ?? "Não foi possível instalar a atualização agora.",
+                ProductIdentity.Name,
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
     }
 
     private static int NormalizeDeg(double deg)
@@ -449,6 +569,7 @@ public partial class MainViewModel : ObservableObject
         _settings.StartWithSim = StartWithSimInput;
         _settings.StartMinimized = StartMinimizedInput;
         _settings.CloseToTray = CloseToTrayInput;
+        _settings.AutoUpdate = AutoUpdateInput;
 
         _settingsService.Save(_settings);
         _broadcaster.UpdateSettings(_settings);

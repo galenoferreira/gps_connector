@@ -140,7 +140,8 @@ public partial class App : Application
         _broadcaster = new XgpsBroadcaster(_sim, settings, _discovery);
         _flightPlanServer = new FlightPlanServer();
         _flightPlanServer.Start(settings.FlightPlanPort);
-        var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings, _flightPlanServer, _discovery);
+        var viewModel = new MainViewModel(_sim, _broadcaster, settingsService, settings,
+                                          _flightPlanServer, _discovery, _updates);
 
         var window = new MainWindow { DataContext = viewModel };
         MainWindow = window;
