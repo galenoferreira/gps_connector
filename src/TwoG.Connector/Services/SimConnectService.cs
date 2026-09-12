@@ -168,6 +168,7 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
                 }
                 catch (COMException)
                 {
+                    // Pipe caiu ao mandar um comando: mesmo tratamento do ReceiveMessage.
                     TearDown();
                 }
             }

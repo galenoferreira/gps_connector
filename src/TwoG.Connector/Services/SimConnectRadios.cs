@@ -230,20 +230,17 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
         return true;
     }
 
-    /// <summary>Executa os comandos da fila. Chamado quando <see cref="CommandSignal"/> dispara.</summary>
+    /// <summary>
+    /// Executa os comandos da fila. Chamado quando <see cref="CommandSignal"/> dispara.
+    /// A recusa do simulador (evento desconhecido, valor que ele não aceita) NÃO chega aqui:
+    /// vem depois, como SIMCONNECT_RECV_EXCEPTION, e o estado continua mostrando o valor antigo.
+    /// COMException aqui é a chamada nativa falhando, ou seja, o pipe caiu: ela sobe para o
+    /// SimConnectService derrubar a conexão (TearDown, que também esvazia a fila por <see cref="Reset"/>).
+    /// </summary>
     public void Drain(SimConnect sim)
     {
         while (_pending.TryDequeue(out var command))
-        {
-            try
-            {
-                Execute(sim, command);
-            }
-            catch (COMException)
-            {
-                // O simulador recusou; o estado continua mostrando o valor antigo, e o app percebe.
-            }
-        }
+            Execute(sim, command);
     }
 
     /// <summary>Conexão caiu (TearDown): nada de estado, nada de controles.</summary>
