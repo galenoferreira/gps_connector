@@ -17,6 +17,23 @@ public sealed record PendingUpdate(string Version, string AssetName, string File
     public bool IsFor(InstallKind kind) =>
         InstallKindDetector.AssetFor(kind) is { } asset
         && string.Equals(AssetName, asset, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>As tentativas desta versão acabaram: ela não será mais instalada sozinha.</summary>
+    public bool AttemptsExhausted => Attempts >= UpdatePolicy.MaxAttempts;
+
+    /// <summary>
+    /// Se esta cópia vai de fato instalar a pendência. Fonte única para o TryApply e
+    /// para a faixa da interface: a faixa não pode oferecer o que o TryApply recusa.
+    /// </summary>
+    public bool CanBeInstalledBy(InstallKind kind, AppVersion current) =>
+        IsFor(kind) && !AttemptsExhausted && !IsStaleFor(current);
+
+    /// <summary>
+    /// Versão igual ou anterior à instalada (ou ilegível): sobra de uma atualização que
+    /// já deu certo. Deve ser apagada, nunca oferecida.
+    /// </summary>
+    public bool IsStaleFor(AppVersion current) =>
+        !AppVersion.TryParse(Version, out var version) || version.CompareTo(current) <= 0;
 }
 
 /// <summary>Persiste a atualização pendente em <c>updates/pending.json</c>.</summary>

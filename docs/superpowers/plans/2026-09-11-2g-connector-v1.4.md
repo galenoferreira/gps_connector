@@ -1704,13 +1704,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Criar: `src/TwoG.Connector.Core/InstallKindDetector.cs`
 - Criar: `tests/TwoG.Connector.Core.Tests/UpdatePolicyTests.cs`
 - Criar: `tests/TwoG.Connector.Core.Tests/PendingUpdateStoreTests.cs`
+- Criar: `tests/TwoG.Connector.Core.Tests/PendingUpdateTests.cs`
 - Criar: `tests/TwoG.Connector.Core.Tests/InstallKindDetectorTests.cs`
 
 **Interfaces:**
 - Consome: `ProductIdentity.ExeFileName`, `ProductIdentity.SetupFileName`.
 - Produz:
   - `enum UpdateTrigger { Startup, Exit, Manual, Periodic }`, `enum UpdateDecision { Apply, ConfirmFirst, Skip }`, `UpdatePolicy.MaxAttempts = 2`, `UpdatePolicy.Decide(UpdateTrigger trigger, bool inFlight, int attemptsSoFar) : UpdateDecision`
-  - `sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts)` com `IsFor(InstallKind) : bool` — o arquivo baixado é o `AssetFor` deste tipo (ignora caixa); `ReadOnly` nunca
+  - `sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts)` com `IsFor(InstallKind) : bool` (o arquivo baixado é o `AssetFor` deste tipo, ignorando caixa; `ReadOnly` nunca), `AttemptsExhausted : bool` (`Attempts >= UpdatePolicy.MaxAttempts`), `CanBeInstalledBy(InstallKind, AppVersion) : bool` (`IsFor`, tentativas sobrando e versão maior que a instalada: regra única do `TryApply` e da faixa da interface) e `IsStaleFor(AppVersion) : bool` (versão igual ou anterior à instalada, ou ilegível)
   - `PendingUpdateStore.StateFileName`, `Load(string updatesDir) : PendingUpdate?`, `Save(string updatesDir, PendingUpdate)`, `Clear(string updatesDir)`, `FileIsIntact(PendingUpdate) : bool`, `RecordAttempt(string updatesDir, PendingUpdate) : PendingUpdate`
   - `enum InstallKind { Installer, Portable, ReadOnly }`, `InstallKindDetector.Detect(IEnumerable<string> fileNamesInExeDir, bool exeDirWritable) : InstallKind`, `InstallKindDetector.AssetFor(InstallKind) : string?`
 
@@ -1967,7 +1968,37 @@ using System.Text.Json;
 namespace TwoG.Connector.Core;
 
 /// <summary>Atualização baixada e verificada, aguardando um momento seguro para instalar.</summary>
-public sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts);
+public sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts)
+{
+    /// <summary>
+    /// Se o arquivo baixado serve para uma cópia deste tipo. A pasta updates é uma só
+    /// por usuário, e a cópia instalada e uma avulsa enxergam a pendência uma da
+    /// outra: sem esta conferência a avulsa se trocaria pelo setup, e a instalada
+    /// rodaria o exe avulso como se fosse o setup. Pasta sem escrita não instala nada.
+    /// Confira antes de <see cref="PendingUpdateStore.RecordAttempt"/>, para a pendência
+    /// de outra cópia não gastar as tentativas dela.
+    /// </summary>
+    public bool IsFor(InstallKind kind) =>
+        InstallKindDetector.AssetFor(kind) is { } asset
+        && string.Equals(AssetName, asset, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>As tentativas desta versão acabaram: ela não será mais instalada sozinha.</summary>
+    public bool AttemptsExhausted => Attempts >= UpdatePolicy.MaxAttempts;
+
+    /// <summary>
+    /// Se esta cópia vai de fato instalar a pendência. Fonte única para o TryApply e
+    /// para a faixa da interface: a faixa não pode oferecer o que o TryApply recusa.
+    /// </summary>
+    public bool CanBeInstalledBy(InstallKind kind, AppVersion current) =>
+        IsFor(kind) && !AttemptsExhausted && !IsStaleFor(current);
+
+    /// <summary>
+    /// Versão igual ou anterior à instalada (ou ilegível): sobra de uma atualização que
+    /// já deu certo. Deve ser apagada, nunca oferecida.
+    /// </summary>
+    public bool IsStaleFor(AppVersion current) =>
+        !AppVersion.TryParse(Version, out var version) || version.CompareTo(current) <= 0;
+}
 
 /// <summary>Persiste a atualização pendente em <c>updates/pending.json</c>.</summary>
 public static class PendingUpdateStore
@@ -2850,6 +2881,13 @@ internal sealed class UpdateService : IDisposable
         _http.DefaultRequestHeaders.UserAgent.ParseAdd($"2G-Connector/{current}");
         _checker = new UpdateChecker(_http, feed, updatesDir, UpdateKeys.Accepted);
         Pending = PendingUpdateStore.Load(updatesDir);
+        // Sobra da atualização que acabou de dar certo: some já na partida, antes de
+        // qualquer gatilho — com o auto-update desligado o TryApply nem chegaria a olhar.
+        if (Pending is not null && Pending.IsStaleFor(current))
+        {
+            PendingUpdateStore.Clear(updatesDir);
+            Pending = null;
+        }
     }
 
     public static UpdateService Create(AppSettings settings)
@@ -2924,28 +2962,13 @@ internal sealed class UpdateService : IDisposable
 
         var pending = PendingUpdateStore.Load(_updatesDir);
         Pending = pending;
-        if (pending is null || !AppVersion.TryParse(pending.Version, out var version))
-            return false;
-
-        // Pendência de uma versão já instalada: sobra da atualização que acabou de dar certo.
-        if (version.CompareTo(CurrentVersion) <= 0)
-        {
-            PendingUpdateStore.Clear(_updatesDir);
-            Pending = null;
-            return false;
-        }
-
-        // A pasta updates é de todas as cópias do usuário: o que outra cópia baixou
-        // (setup × exe avulso) não serve aqui e não pode gastar as tentativas dela.
-        // A próxima verificação desta cópia troca pelo arquivo certo.
-        if (!pending.IsFor(Kind))
+        // Mesma regra que a faixa da interface usa: o que não passa aqui não é oferecido lá.
+        if (pending is null || !pending.CanBeInstalledBy(Kind, CurrentVersion))
             return false;
 
         switch (UpdatePolicy.Decide(trigger, inFlight, pending.Attempts))
         {
             case UpdateDecision.Skip:
-                if (pending.Attempts >= UpdatePolicy.MaxAttempts)
-                    LastError = $"a instalação da v{version} falhou {pending.Attempts} vezes — baixe manualmente";
                 return false;
             case UpdateDecision.ConfirmFirst when confirmInFlight?.Invoke() != true:
                 return false;
@@ -2970,7 +2993,7 @@ internal sealed class UpdateService : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception)
         {
-            LastError = $"falha ao instalar a v{version}: {ex.Message}";
+            LastError = $"falha ao instalar a v{pending.Version}: {ex.Message}";
             return false;
         }
     }
@@ -3297,11 +3320,21 @@ Métodos novos:
 
         var pending = updates.Pending;
         var latest = updates.LatestSeen;
-        if (pending is not null && pending.IsFor(updates.Kind))    // a de outra cópia não instala aqui
+        // Mesma regra do TryApply: só oferece o que esta cópia vai de fato instalar.
+        if (pending is not null && pending.CanBeInstalledBy(updates.Kind, updates.CurrentVersion))
         {
             HasUpdateBanner = true;
             CanApplyUpdateNow = true;
             UpdateBannerText = $"v{pending.Version} pronta — instala ao reiniciar";
+        }
+        else if (pending is not null && pending.IsFor(updates.Kind) && pending.AttemptsExhausted
+                 && !pending.IsStaleFor(updates.CurrentVersion))
+        {
+            // Derivado do estado em disco, não do LastError: a próxima verificação
+            // zeraria a mensagem, e o spec pede que a falha continue visível.
+            HasUpdateBanner = true;
+            CanApplyUpdateNow = false;
+            UpdateBannerText = $"A instalação da v{pending.Version} falhou {pending.Attempts} vezes — baixe manualmente";
         }
         else if (updates.Kind == InstallKind.ReadOnly && latest is not null && latest > updates.CurrentVersion)
         {
@@ -3340,16 +3373,28 @@ Métodos novos:
             return;
 
         var inFlight = _sim.State == SimConnectionState.Receiving;
+        var pilotDeclined = false;
         var started = app.ApplyUpdateNow(inFlight, confirmInFlight: () =>
-            System.Windows.MessageBox.Show(
+        {
+            var confirmed = System.Windows.MessageBox.Show(
                 "Você está em voo. O tablet fica sem posição por alguns segundos enquanto o "
                 + $"{ProductIdentity.Name} se atualiza.\n\nAtualizar agora?",
                 ProductIdentity.Name,
                 System.Windows.MessageBoxButton.YesNo,
-                System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes);
+                System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes;
+            pilotDeclined = !confirmed;
+            return confirmed;
+        });
 
-        if (!started)
-            UpdateBannerText = "Não foi possível instalar agora — veja o Diagnóstico.";
+        // Caixa de mensagem, não texto na faixa: o próximo tique de 250 ms sobrescreveria
+        // a faixa. Se quem recusou foi o piloto (Não na confirmação de voo), não há falha
+        // a avisar — e o LastError estaria vazio.
+        if (!started && !pilotDeclined)
+            System.Windows.MessageBox.Show(
+                _updates?.LastError ?? "Não foi possível instalar a atualização agora.",
+                ProductIdentity.Name,
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
     }
 ```
 
