@@ -49,8 +49,12 @@ public static class ControlProtocol
             };
             return message is not null;
         }
-        catch (JsonException)
+        // JsonException: JSON inválido. InvalidOperationException: escape de surrogate solto
+        // (\uD800), que o leitor aceita mas GetString() recusa. ArgumentException: UTF-16
+        // inválido na própria string de entrada, que não transcodifica para UTF-8.
+        catch (Exception e) when (e is JsonException or InvalidOperationException or ArgumentException)
         {
+            message = null;
             return false;
         }
     }

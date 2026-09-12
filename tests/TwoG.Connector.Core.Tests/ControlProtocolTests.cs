@@ -86,9 +86,21 @@ public class ControlProtocolTests
     [InlineData("""{"type":"set","id":"a","control":"com1.active"}""")]
     [InlineData("""{"type":"set","control":"com1.active","value":1}""")]
     [InlineData("""{"type":"action","id":"","control":"com1.swap"}""")]
+    // Escape de surrogate solto: o JSON é válido, mas o texto não é UTF-16 válido.
+    [InlineData("""{"type":"\uDC00"}""")]
+    [InlineData("""{"type":"pair","code":"\uD800"}""")]
+    [InlineData("""{"type":"hello","protocol":1,"device":{"id":"a","name":"\uD800x"}}""")]
     public void RejectsMalformedMessagesWithoutThrowing(string json)
     {
         Assert.False(ControlProtocol.TryParse(json, out var message));
+        Assert.Null(message);
+    }
+
+    [Fact]
+    public void RejectsLoneSurrogateInInputWithoutThrowing()
+    {
+        // Caractere (não escape) de surrogate solto na própria string de entrada.
+        Assert.False(ControlProtocol.TryParse("{\"type\":\"pair\",\"code\":\"" + '\uD800' + "\"}", out var message));
         Assert.Null(message);
     }
 
