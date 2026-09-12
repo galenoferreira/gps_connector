@@ -2231,7 +2231,7 @@ Decisões de implementação, todas vindas do 01:
 - **O upgrade HTTP é feito à mão**, lendo os cabeçalhos byte a byte até a linha em branco (limite de 8 KB, prazo de 5 s). O cliente só manda quadros WebSocket depois do `101`, então ler além dos cabeçalhos é impossível. Falhas respondem `405` (não é GET), `404` (outro caminho) e `400` (sem os cabeçalhos de WebSocket).
 - **A vaga de conexão é reservada com `Interlocked` antes da sessão.** Com a checagem e a inclusão separadas, duas conexões simultâneas passariam juntas pelo limite.
 - **Ping e prazo de pong vêm do próprio `WebSocket`** (`KeepAliveInterval` + `KeepAliveTimeout`), somando os 45 s do 01.
-- **O envio de estado é feito por um laço único** em `PushInterval`: quando o `ISimControl` avisa mudança, cada conexão pareada recebe `controls` (se a lista mudou) e `state`. Isso limita a 10 `state` por segundo e junta mudanças próximas. O filtro é `Session.ReadyForPush`, não `Phase == Paired`: a fase muda dentro do `Handle`, antes de `paired`/`welcome` irem para a rede, e o laço de recepção só chama `MarkWelcomeSent()` depois de enviar o pacote todo (e marca `_dirty` para não perder uma mudança pulada nessa janela).
+- **O envio de estado é feito por um laço único** em `PushInterval`: quando o `ISimControl` avisa mudança, cada conexão pareada recebe `controls` (se a lista mudou) e `state`. Isso limita a 10 `state` por segundo e junta mudanças próximas. O filtro é `Session.ReadyForPush`, não `Phase == Paired`: a fase muda dentro do `Handle`, antes de `paired`/`welcome` irem para a rede, e o laço de recepção só chama `MarkWelcomeSent()` depois de enviar o pacote todo. Para não perder o que mudou nessa janela: `LastControls` guarda a lista que foi no pacote (não uma recalculada depois), e `_dirty` só é remarcado se o contador `_changeGeneration` andou desde o `Handle` — marcar sempre mandaria um `state` extra a cada pareamento, na frente do `result`/`controls`/`state` que os testes esperam.
 - **Um envio de cada vez por conexão** (`SemaphoreSlim`), porque o `WebSocket` não aceita dois `SendAsync` simultâneos.
 
 - [ ] **Passo 1: Testes que falham**
@@ -2549,6 +2549,7 @@ public sealed class ControlServer : IDisposable
     private CancellationTokenSource? _cancellation;
     private int _slots;
     private volatile bool _dirty;
+    private long _changeGeneration;   // conta os avisos do simulador; ver o pareamento no laço de recepção
 
     public ControlServer(ISimControl control, PairedDeviceStore devices, PairingCodes codes,
                          string connectorVersion, ControlServerOptions? options = null)
@@ -2558,7 +2559,11 @@ public sealed class ControlServer : IDisposable
         _codes = codes;
         _connectorVersion = connectorVersion;
         _options = options ?? new ControlServerOptions();
-        _control.Changed += () => _dirty = true;
+        _control.Changed += () =>
+        {
+            Interlocked.Increment(ref _changeGeneration);
+            _dirty = true;
+        };
         _devices.Removed += OnDeviceRemoved;
     }
 
@@ -2798,22 +2803,28 @@ public sealed class ControlServer : IDisposable
             }
 
             var wasPaired = connection.Session.Phase == SessionPhase.Paired;
+            var generation = Interlocked.Read(ref _changeGeneration);
             var output = connection.Session.Handle(Encoding.UTF8.GetString(buffer, 0, count));
-            foreach (var message in output.Messages)
-                await connection.SendAsync(message, token);
-
+            // Antes de enviar: quem recebe o result já pode ler o LastCommand.
             if (connection.Session.LastCommand is { } last)
                 LastCommand = last;
 
+            foreach (var message in output.Messages)
+                await connection.SendAsync(message, token);
+
             if (!wasPaired && connection.Session.Phase == SessionPhase.Paired)
             {
-                // O pacote de boas-vindas já levou a lista: a partir daqui só se manda de novo se mudar.
-                connection.LastControls = connection.Session.ControlsMessage();
+                // O app tem a lista que foi no pacote de boas-vindas, não a de agora: se a
+                // aeronave mudou depois do Handle, o laço de envio vê a diferença e manda a nova.
+                connection.LastControls = output.Messages.First(
+                    m => m.StartsWith("""{"type":"controls",""", StringComparison.Ordinal));
                 // Só agora o laço de envio fala com este aparelho: antes, controls e state
-                // chegariam na frente de paired/welcome. Uma mudança que ele pulou nessa
-                // janela vira um state novo no próximo ciclo.
+                // chegariam na frente de paired/welcome. Se o simulador avisou mudança desde
+                // o Handle, o ciclo que a tratou pode ter pulado esta conexão: marca de novo.
+                // Sem mudança nada é marcado, e nenhum state extra vai para a rede.
                 connection.Session.MarkWelcomeSent();
-                _dirty = true;
+                if (Interlocked.Read(ref _changeGeneration) != generation)
+                    _dirty = true;
                 ConnectionsChanged?.Invoke();
             }
 
