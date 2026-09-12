@@ -22,6 +22,14 @@ if (!AppVersion.TryParse(args[1], out var version))
     Console.Error.WriteLine($"versão inválida: {args[1]}");
     return 2;
 }
+// O app monta a URL do binário a partir da versão do manifesto (releases/download/v{versão}),
+// então ela tem de ser idêntica à da tag. TryParse aceita "v", espaços e "+build" e os
+// descarta; aceitar "1.4.0+1" aqui assinaria "1.4.0" e todo app baixaria um 404.
+if (!string.Equals(version.ToString(), args[1], StringComparison.Ordinal))
+{
+    Console.Error.WriteLine($"versão não canônica: {args[1]} (esperado {version})");
+    return 2;
+}
 
 var keyPem = Environment.GetEnvironmentVariable("UPDATE_SIGNING_KEY");
 if (string.IsNullOrWhiteSpace(keyPem))
