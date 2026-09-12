@@ -47,7 +47,9 @@ public class ControlAnnouncementTests
     [Fact]
     public void CommaInTheDeviceNameCannotBreakTheSentence()
     {
-        Assert.StartsWith("2GCTLMeu PC 1,1,", ControlAnnouncement.Sentence("Meu PC,1","ws://h:1/control"));
+        // Sem espaço depois da vírgula: SanitizeDeviceName troca a vírgula por espaço e não
+        // junta espaços, então "Meu PC, 1" viraria "Meu PC  1".
+        Assert.StartsWith("2GCTLMeu PC 1,1,", ControlAnnouncement.Sentence("Meu PC,1", "ws://h:1/control"));
     }
 
     [Theory]

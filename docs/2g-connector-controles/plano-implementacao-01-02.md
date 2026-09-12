@@ -3491,7 +3491,9 @@ public class ControlAnnouncementTests
     [Fact]
     public void CommaInTheDeviceNameCannotBreakTheSentence()
     {
-        Assert.StartsWith("2GCTLMeu PC 1,1,", ControlAnnouncement.Sentence("Meu PC, 1", "ws://h:1/control"));
+        // Sem espaço depois da vírgula: SanitizeDeviceName troca a vírgula por espaço e não
+        // junta espaços, então "Meu PC, 1" viraria "Meu PC  1".
+        Assert.StartsWith("2GCTLMeu PC 1,1,", ControlAnnouncement.Sentence("Meu PC,1", "ws://h:1/control"));
     }
 
     [Theory]
@@ -3662,19 +3664,29 @@ Em `src/TwoG.Connector/Services/IXgpsBroadcaster.cs`, depois de `SendNow`:
     /// <summary>
     /// Envia a cada destino atual uma sentença própria, montada por <paramref name="sentenceFor"/>.
     /// Destino para o qual a função devolve null é pulado. Usado pelo anúncio 2GCTL, cujo
-    /// conteúdo depende da interface de saída.
+    /// conteúdo depende da interface de saída. Não conta em <see cref="PacketsSent"/> nem em
+    /// <see cref="LastSendUtc"/>, que ficam sendo a prova de que o XGPS está saindo; falhas
+    /// de socket contam em <see cref="SendFailures"/>.
     /// </summary>
     void SendToEach(Func<IPEndPoint, string?> sentenceFor);
 ```
 
 (acrescentar `using System.Net;` no topo do arquivo.)
 
-Em `src/TwoG.Connector/Services/XgpsBroadcaster.cs`, substituir o método `SendToAll` inteiro por estes dois — o envio a todos passa a ser o caso particular do envio por destino:
+Em `src/TwoG.Connector/Services/XgpsBroadcaster.cs`, substituir o método `SendToAll` inteiro por estes três — o envio a todos e o envio por destino passam pelo mesmo laço, e só o primeiro conta como pacote enviado. O anúncio sai a cada 5 s mesmo sem simulador; contado em `PacketsSent`, faria o "N pacotes" da tela e o "enviados" do diagnóstico subirem ao lado de "Parado — sem simulador":
 
 ```csharp
-    private void SendToAll(string sentence) => SendToEach(_ => sentence);
+    private void SendToAll(string sentence) => Send(_ => sentence, countAsSent: true);
 
-    public void SendToEach(Func<IPEndPoint, string?> sentenceFor)
+    /// <summary>
+    /// Não entra em <see cref="PacketsSent"/> nem em <see cref="LastSendUtc"/>: o anúncio 2GCTL
+    /// sai a cada 5 s mesmo sem simulador, e contado ali faria o contador da tela subir com
+    /// "Parado — sem simulador" ao lado, deixando de provar que o XGPS está saindo. Falha de
+    /// socket continua registrada: ela diz o mesmo sobre o destino, venha de que sentença vier.
+    /// </summary>
+    public void SendToEach(Func<IPEndPoint, string?> sentenceFor) => Send(sentenceFor, countAsSent: false);
+
+    private void Send(Func<IPEndPoint, string?> sentenceFor, bool countAsSent)
     {
         var udp = _udp;
         if (udp is null)
@@ -3690,8 +3702,11 @@ Em `src/TwoG.Connector/Services/XgpsBroadcaster.cs`, substituir o método `SendT
             try
             {
                 udp.Send(payload, payload.Length, endpoint);
-                Interlocked.Increment(ref _packetsSent);
-                Interlocked.Exchange(ref _lastSendTicks, DateTime.UtcNow.Ticks);
+                if (countAsSent)
+                {
+                    Interlocked.Increment(ref _packetsSent);
+                    Interlocked.Exchange(ref _lastSendTicks, DateTime.UtcNow.Ticks);
+                }
             }
             catch (SocketException ex)
             {

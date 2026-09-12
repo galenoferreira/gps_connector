@@ -184,9 +184,17 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
         return fix.IsFinite ? fix : null;
     }
 
-    private void SendToAll(string sentence) => SendToEach(_ => sentence);
+    private void SendToAll(string sentence) => Send(_ => sentence, countAsSent: true);
 
-    public void SendToEach(Func<IPEndPoint, string?> sentenceFor)
+    /// <summary>
+    /// Não entra em <see cref="PacketsSent"/> nem em <see cref="LastSendUtc"/>: o anúncio 2GCTL
+    /// sai a cada 5 s mesmo sem simulador, e contado ali faria o contador da tela subir com
+    /// "Parado — sem simulador" ao lado, deixando de provar que o XGPS está saindo. Falha de
+    /// socket continua registrada: ela diz o mesmo sobre o destino, venha de que sentença vier.
+    /// </summary>
+    public void SendToEach(Func<IPEndPoint, string?> sentenceFor) => Send(sentenceFor, countAsSent: false);
+
+    private void Send(Func<IPEndPoint, string?> sentenceFor, bool countAsSent)
     {
         var udp = _udp;
         if (udp is null)
@@ -202,8 +210,11 @@ public sealed class XgpsBroadcaster : IXgpsBroadcaster
             try
             {
                 udp.Send(payload, payload.Length, endpoint);
-                Interlocked.Increment(ref _packetsSent);
-                Interlocked.Exchange(ref _lastSendTicks, DateTime.UtcNow.Ticks);
+                if (countAsSent)
+                {
+                    Interlocked.Increment(ref _packetsSent);
+                    Interlocked.Exchange(ref _lastSendTicks, DateTime.UtcNow.Ticks);
+                }
             }
             catch (SocketException ex)
             {

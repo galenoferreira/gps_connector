@@ -39,7 +39,9 @@ public interface IXgpsBroadcaster : IDisposable
     /// <summary>
     /// Envia a cada destino atual uma sentença própria, montada por <paramref name="sentenceFor"/>.
     /// Destino para o qual a função devolve null é pulado. Usado pelo anúncio 2GCTL, cujo
-    /// conteúdo depende da interface de saída.
+    /// conteúdo depende da interface de saída. Não conta em <see cref="PacketsSent"/> nem em
+    /// <see cref="LastSendUtc"/>, que ficam sendo a prova de que o XGPS está saindo; falhas
+    /// de socket contam em <see cref="SendFailures"/>.
     /// </summary>
     void SendToEach(Func<IPEndPoint, string?> sentenceFor);
 }
