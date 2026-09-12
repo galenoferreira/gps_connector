@@ -1648,7 +1648,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Produz:
   - `enum SessionPhase { AwaitingHello, Unpaired, Paired }`
   - `sealed record SessionOutput(IReadOnlyList<string> Messages, int? CloseCode = null, string? CloseReason = null)` com `SessionOutput.None`
-  - `sealed class ControlSession(ISimControl control, PairedDeviceStore devices, PairingCodes codes, string connectorVersion, Func<DateTime>? utcNow = null)` com `Phase`, `DeviceId`, `DeviceName`, `LastCommand` (resumo para o Diagnóstico), `Handle(string json) : SessionOutput`, `StateMessage() : string`, `ControlsMessage() : string`, e as constantes `MaxCommandsPerSecond = 20`, `MaxRefusalsPer10Seconds = 100`, `CloseProtocolUnsupported = 4002`, `CloseRateLimited = 4008`
+  - `sealed class ControlSession(ISimControl control, PairedDeviceStore devices, PairingCodes codes, string connectorVersion, Func<DateTime>? utcNow = null)` (o relógio padrão é monotônico: só mede as janelas de taxa) com `Phase`, `ReadyForPush` (pareada e com o pacote de boas-vindas já enviado), `MarkWelcomeSent()`, `DeviceId`, `DeviceName`, `LastCommand` (resumo para o Diagnóstico), `Handle(string json) : SessionOutput`, `StateMessage() : string`, `ControlsMessage() : string`, e as constantes `MaxCommandsPerSecond = 20`, `MaxRefusalsPer10Seconds = 100`, `CloseProtocolUnsupported = 4002`, `CloseRateLimited = 4008`
   - Helper de teste `FakeSimControl : ISimControl` com `Submitted`, `FailWith`, `RaiseChanged()`
 
 A sessão não sabe nada de socket: recebe o texto de uma mensagem e devolve o que enviar e se deve fechar. É isso que a torna testável sem rede. A validação pelo catálogo e pela lista de controles da aeronave acontece **aqui**, antes de o comando chegar ao `ISimControl`.
@@ -1724,9 +1724,9 @@ public class ControlSessionTests : IDisposable
     private static JsonElement Json(string message) => JsonDocument.Parse(message).RootElement.Clone();
 
     /// <summary>Sessão já pareada, pronta para comandos.</summary>
-    private ControlSession PairedSession()
+    private ControlSession PairedSession(ControlSession? session = null)
     {
-        var session = NewSession();
+        session ??= NewSession();
         session.Handle(Hello);
         session.Handle($$"""{"type":"pair","code":"{{_codes.Generate()}}"}""");
         Assert.Equal(SessionPhase.Paired, session.Phase);
@@ -1909,6 +1909,47 @@ public class ControlSessionTests : IDisposable
     }
 
     [Fact]
+    public void DefaultMonotonicClockAlsoLimitsTheRate()
+    {
+        // Sem relógio injetado: 21 comandos seguidos cabem folgados em um segundo.
+        var session = PairedSession(new ControlSession(_sim, _devices, _codes, "1.5.0"));
+        for (var i = 0; i < ControlSession.MaxCommandsPerSecond; i++)
+            Assert.True(Json(session.Handle(Set($"c{i}", "com1.active", 121_900_000)).Messages[0]).GetProperty("ok").GetBoolean());
+
+        var refused = Json(session.Handle(Set("extra", "com1.active", 121_900_000)).Messages[0]);
+        Assert.Equal("rate_limited", refused.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public void PushWaitsUntilTheWelcomeIsSent()
+    {
+        var session = NewSession();
+        session.Handle(Hello);
+        session.MarkWelcomeSent();
+        Assert.False(session.ReadyForPush);   // antes de parear, marcar não vale
+
+        session.Handle($$"""{"type":"pair","code":"{{_codes.Generate()}}"}""");
+        Assert.Equal(SessionPhase.Paired, session.Phase);
+        Assert.False(session.ReadyForPush);   // paired/welcome ainda não foram para a rede
+
+        session.MarkWelcomeSent();
+        Assert.True(session.ReadyForPush);
+    }
+
+    [Fact]
+    public void PushWaitsForTheWelcomeAlsoWithAToken()
+    {
+        var token = _devices.Pair("ipad-1", "iPad de teste");
+        var session = NewSession();
+
+        session.Handle($$"""{"type":"hello","protocol":1,"device":{"id":"ipad-1","name":"iPad"},"token":"{{token}}"}""");
+        Assert.False(session.ReadyForPush);
+
+        session.MarkWelcomeSent();
+        Assert.True(session.ReadyForPush);
+    }
+
+    [Fact]
     public void MoreThanOneHundredRefusalsInTenSecondsCloses4008()
     {
         var session = PairedSession();
@@ -1957,6 +1998,8 @@ Expected: FAIL de compilação — `ControlSession` não existe.
 `src/TwoG.Connector.Core/ControlSession.cs`:
 
 ```csharp
+using System.Diagnostics;
+
 namespace TwoG.Connector.Core;
 
 public enum SessionPhase
@@ -1990,14 +2033,22 @@ public sealed class ControlSession
     private readonly PairedDeviceStore _devices;
     private readonly PairingCodes _codes;
     private readonly string _connectorVersion;
-    private readonly Func<DateTime> _utcNow;
+    private static readonly long ClockOrigin = Stopwatch.GetTimestamp();
+
+    private readonly Func<DateTime> _now;
     private readonly Queue<DateTime> _recentCommands = new();
     private readonly Queue<DateTime> _recentRefusals = new();
     private long _stateSeq;
     private volatile SessionPhase _phase = SessionPhase.AwaitingHello;
+    private volatile bool _welcomeSent;
     private string? _helloDeviceId;
     private string? _helloDeviceName;
 
+    /// <param name="utcNow">
+    /// Relógio das janelas de taxa, só para os testes. O padrão é monotônico e não a hora do
+    /// sistema: ela pode recuar (acerto do W32Time, volta do modo de espera) e, como a fila
+    /// só é podada pela cabeça, travaria todo comando em rate_limited até alcançar o salto.
+    /// </param>
     public ControlSession(ISimControl control, PairedDeviceStore devices, PairingCodes codes,
                           string connectorVersion, Func<DateTime>? utcNow = null)
     {
@@ -2005,10 +2056,18 @@ public sealed class ControlSession
         _devices = devices;
         _codes = codes;
         _connectorVersion = connectorVersion;
-        _utcNow = utcNow ?? (() => DateTime.UtcNow);
+        _now = utcNow ?? MonotonicNow;
     }
 
     public SessionPhase Phase => _phase;
+
+    /// <summary>
+    /// Pareada E com o pacote de boas-vindas já enviado (<see cref="MarkWelcomeSent"/>).
+    /// É o que libera o laço de envio: <see cref="Phase"/> vira Paired dentro do
+    /// <see cref="Handle"/>, antes de paired/welcome irem para a rede, e um controls ou
+    /// state mandado nessa janela chegaria ao app fora da ordem do spec 01.
+    /// </summary>
+    public bool ReadyForPush => _welcomeSent;
 
     /// <summary>Aparelho pareado desta conexão; null antes do pareamento.</summary>
     public string? DeviceId { get; private set; }
@@ -2039,6 +2098,13 @@ public sealed class ControlSession
         ControlProtocol.State(Interlocked.Increment(ref _stateSeq), _control.SimulatorName, _control.State);
 
     public string ControlsMessage() => ControlProtocol.Controls(_control.AvailableControls);
+
+    /// <summary>O servidor chama depois de enviar TODAS as mensagens do Handle que pareou.</summary>
+    public void MarkWelcomeSent()
+    {
+        if (_phase == SessionPhase.Paired)
+            _welcomeSent = true;
+    }
 
     private SessionOutput OnHello(HelloMessage hello)
     {
@@ -2088,7 +2154,7 @@ public sealed class ControlSession
 
     private SessionOutput OnCommand(ControlCommand command)
     {
-        var now = _utcNow();
+        var now = _now();
         Prune(_recentCommands, now - TimeSpan.FromSeconds(1));
 
         if (_recentCommands.Count >= MaxCommandsPerSecond)
@@ -2119,6 +2185,9 @@ public sealed class ControlSession
         while (queue.Count > 0 && queue.Peek() <= olderThan)
             queue.Dequeue();
     }
+
+    /// <summary>Instante monotônico em forma de DateTime: só serve para medir intervalos.</summary>
+    private static DateTime MonotonicNow() => DateTime.UnixEpoch + Stopwatch.GetElapsedTime(ClockOrigin);
 
     private static SessionOutput Send(string message) => new([message]);
 }
@@ -2162,7 +2231,7 @@ Decisões de implementação, todas vindas do 01:
 - **O upgrade HTTP é feito à mão**, lendo os cabeçalhos byte a byte até a linha em branco (limite de 8 KB, prazo de 5 s). O cliente só manda quadros WebSocket depois do `101`, então ler além dos cabeçalhos é impossível. Falhas respondem `405` (não é GET), `404` (outro caminho) e `400` (sem os cabeçalhos de WebSocket).
 - **A vaga de conexão é reservada com `Interlocked` antes da sessão.** Com a checagem e a inclusão separadas, duas conexões simultâneas passariam juntas pelo limite.
 - **Ping e prazo de pong vêm do próprio `WebSocket`** (`KeepAliveInterval` + `KeepAliveTimeout`), somando os 45 s do 01.
-- **O envio de estado é feito por um laço único** em `PushInterval`: quando o `ISimControl` avisa mudança, cada conexão pareada recebe `controls` (se a lista mudou) e `state`. Isso limita a 10 `state` por segundo e junta mudanças próximas.
+- **O envio de estado é feito por um laço único** em `PushInterval`: quando o `ISimControl` avisa mudança, cada conexão pareada recebe `controls` (se a lista mudou) e `state`. Isso limita a 10 `state` por segundo e junta mudanças próximas. O filtro é `Session.ReadyForPush`, não `Phase == Paired`: a fase muda dentro do `Handle`, antes de `paired`/`welcome` irem para a rede, e o laço de recepção só chama `MarkWelcomeSent()` depois de enviar o pacote todo (e marca `_dirty` para não perder uma mudança pulada nessa janela).
 - **Um envio de cada vez por conexão** (`SemaphoreSlim`), porque o `WebSocket` não aceita dois `SendAsync` simultâneos.
 
 - [ ] **Passo 1: Testes que falham**
@@ -2740,6 +2809,11 @@ public sealed class ControlServer : IDisposable
             {
                 // O pacote de boas-vindas já levou a lista: a partir daqui só se manda de novo se mudar.
                 connection.LastControls = connection.Session.ControlsMessage();
+                // Só agora o laço de envio fala com este aparelho: antes, controls e state
+                // chegariam na frente de paired/welcome. Uma mudança que ele pulou nessa
+                // janela vira um state novo no próximo ciclo.
+                connection.Session.MarkWelcomeSent();
+                _dirty = true;
                 ConnectionsChanged?.Invoke();
             }
 
@@ -2767,7 +2841,7 @@ public sealed class ControlServer : IDisposable
                     continue;
                 _dirty = false;
 
-                foreach (var connection in _connections.Keys.Where(c => c.Session.Phase == SessionPhase.Paired))
+                foreach (var connection in _connections.Keys.Where(c => c.Session.ReadyForPush))
                 {
                     var controls = connection.Session.ControlsMessage();
                     if (controls != connection.LastControls)

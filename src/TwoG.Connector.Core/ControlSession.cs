@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace TwoG.Connector.Core;
 
 public enum SessionPhase
@@ -31,14 +33,22 @@ public sealed class ControlSession
     private readonly PairedDeviceStore _devices;
     private readonly PairingCodes _codes;
     private readonly string _connectorVersion;
-    private readonly Func<DateTime> _utcNow;
+    private static readonly long ClockOrigin = Stopwatch.GetTimestamp();
+
+    private readonly Func<DateTime> _now;
     private readonly Queue<DateTime> _recentCommands = new();
     private readonly Queue<DateTime> _recentRefusals = new();
     private long _stateSeq;
     private volatile SessionPhase _phase = SessionPhase.AwaitingHello;
+    private volatile bool _welcomeSent;
     private string? _helloDeviceId;
     private string? _helloDeviceName;
 
+    /// <param name="utcNow">
+    /// Relógio das janelas de taxa, só para os testes. O padrão é monotônico e não a hora do
+    /// sistema: ela pode recuar (acerto do W32Time, volta do modo de espera) e, como a fila
+    /// só é podada pela cabeça, travaria todo comando em rate_limited até alcançar o salto.
+    /// </param>
     public ControlSession(ISimControl control, PairedDeviceStore devices, PairingCodes codes,
                           string connectorVersion, Func<DateTime>? utcNow = null)
     {
@@ -46,10 +56,18 @@ public sealed class ControlSession
         _devices = devices;
         _codes = codes;
         _connectorVersion = connectorVersion;
-        _utcNow = utcNow ?? (() => DateTime.UtcNow);
+        _now = utcNow ?? MonotonicNow;
     }
 
     public SessionPhase Phase => _phase;
+
+    /// <summary>
+    /// Pareada E com o pacote de boas-vindas já enviado (<see cref="MarkWelcomeSent"/>).
+    /// É o que libera o laço de envio: <see cref="Phase"/> vira Paired dentro do
+    /// <see cref="Handle"/>, antes de paired/welcome irem para a rede, e um controls ou
+    /// state mandado nessa janela chegaria ao app fora da ordem do spec 01.
+    /// </summary>
+    public bool ReadyForPush => _welcomeSent;
 
     /// <summary>Aparelho pareado desta conexão; null antes do pareamento.</summary>
     public string? DeviceId { get; private set; }
@@ -80,6 +98,13 @@ public sealed class ControlSession
         ControlProtocol.State(Interlocked.Increment(ref _stateSeq), _control.SimulatorName, _control.State);
 
     public string ControlsMessage() => ControlProtocol.Controls(_control.AvailableControls);
+
+    /// <summary>O servidor chama depois de enviar TODAS as mensagens do Handle que pareou.</summary>
+    public void MarkWelcomeSent()
+    {
+        if (_phase == SessionPhase.Paired)
+            _welcomeSent = true;
+    }
 
     private SessionOutput OnHello(HelloMessage hello)
     {
@@ -129,7 +154,7 @@ public sealed class ControlSession
 
     private SessionOutput OnCommand(ControlCommand command)
     {
-        var now = _utcNow();
+        var now = _now();
         Prune(_recentCommands, now - TimeSpan.FromSeconds(1));
 
         if (_recentCommands.Count >= MaxCommandsPerSecond)
@@ -160,6 +185,9 @@ public sealed class ControlSession
         while (queue.Count > 0 && queue.Peek() <= olderThan)
             queue.Dequeue();
     }
+
+    /// <summary>Instante monotônico em forma de DateTime: só serve para medir intervalos.</summary>
+    private static DateTime MonotonicNow() => DateTime.UnixEpoch + Stopwatch.GetElapsedTime(ClockOrigin);
 
     private static SessionOutput Send(string message) => new([message]);
 }

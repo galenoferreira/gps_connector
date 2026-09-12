@@ -28,9 +28,9 @@ public class ControlSessionTests : IDisposable
     private static JsonElement Json(string message) => JsonDocument.Parse(message).RootElement.Clone();
 
     /// <summary>Sessão já pareada, pronta para comandos.</summary>
-    private ControlSession PairedSession()
+    private ControlSession PairedSession(ControlSession? session = null)
     {
-        var session = NewSession();
+        session ??= NewSession();
         session.Handle(Hello);
         session.Handle($$"""{"type":"pair","code":"{{_codes.Generate()}}"}""");
         Assert.Equal(SessionPhase.Paired, session.Phase);
@@ -210,6 +210,47 @@ public class ControlSessionTests : IDisposable
 
         _now = _now.AddSeconds(1.1);
         Assert.True(Json(session.Handle(Set("later", "com1.active", 121_900_000)).Messages[0]).GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public void DefaultMonotonicClockAlsoLimitsTheRate()
+    {
+        // Sem relógio injetado: 21 comandos seguidos cabem folgados em um segundo.
+        var session = PairedSession(new ControlSession(_sim, _devices, _codes, "1.5.0"));
+        for (var i = 0; i < ControlSession.MaxCommandsPerSecond; i++)
+            Assert.True(Json(session.Handle(Set($"c{i}", "com1.active", 121_900_000)).Messages[0]).GetProperty("ok").GetBoolean());
+
+        var refused = Json(session.Handle(Set("extra", "com1.active", 121_900_000)).Messages[0]);
+        Assert.Equal("rate_limited", refused.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public void PushWaitsUntilTheWelcomeIsSent()
+    {
+        var session = NewSession();
+        session.Handle(Hello);
+        session.MarkWelcomeSent();
+        Assert.False(session.ReadyForPush);   // antes de parear, marcar não vale
+
+        session.Handle($$"""{"type":"pair","code":"{{_codes.Generate()}}"}""");
+        Assert.Equal(SessionPhase.Paired, session.Phase);
+        Assert.False(session.ReadyForPush);   // paired/welcome ainda não foram para a rede
+
+        session.MarkWelcomeSent();
+        Assert.True(session.ReadyForPush);
+    }
+
+    [Fact]
+    public void PushWaitsForTheWelcomeAlsoWithAToken()
+    {
+        var token = _devices.Pair("ipad-1", "iPad de teste");
+        var session = NewSession();
+
+        session.Handle($$"""{"type":"hello","protocol":1,"device":{"id":"ipad-1","name":"iPad"},"token":"{{token}}"}""");
+        Assert.False(session.ReadyForPush);
+
+        session.MarkWelcomeSent();
+        Assert.True(session.ReadyForPush);
     }
 
     [Fact]
