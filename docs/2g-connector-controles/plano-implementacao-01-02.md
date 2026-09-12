@@ -2233,6 +2233,7 @@ Decisões de implementação, todas vindas do 01:
 - **Ping e prazo de pong vêm do próprio `WebSocket`** (`KeepAliveInterval` + `KeepAliveTimeout`), somando os 45 s do 01.
 - **O envio de estado é feito por um laço único** em `PushInterval`: quando o `ISimControl` avisa mudança, cada conexão pareada recebe `controls` (se a lista mudou) e `state`. Isso limita a 10 `state` por segundo e junta mudanças próximas. O filtro é `Session.ReadyForPush`, não `Phase == Paired`: a fase muda dentro do `Handle`, antes de `paired`/`welcome` irem para a rede, e o laço de recepção só chama `MarkWelcomeSent()` depois de enviar o pacote todo. Para não perder o que mudou nessa janela: `LastControls` guarda a lista que foi no pacote (não uma recalculada depois), e `_dirty` só é remarcado se o contador `_changeGeneration` andou desde o `Handle` — marcar sempre mandaria um `state` extra a cada pareamento, na frente do `result`/`controls`/`state` que os testes esperam.
 - **Um envio de cada vez por conexão** (`SemaphoreSlim`), porque o `WebSocket` não aceita dois `SendAsync` simultâneos.
+- **`LastCommand` do servidor só muda quando a mensagem foi um comando.** `ControlSession.LastCommand` guarda o último da sessão; copiar depois de qualquer `Handle` faria um `type` desconhecido, uma mensagem inválida ou um `rate_limited` do aparelho A trazer de volta o comando antigo de A por cima do mais novo de B. O laço guarda a referência antes do `Handle` e só copia se ela mudou (cada comando gera uma string nova na sessão).
 
 - [ ] **Passo 1: Testes que falham**
 
@@ -2374,6 +2375,36 @@ public class ControlServerTests : IDisposable
         Assert.True(result.GetProperty("ok").GetBoolean());
         Assert.Equal("com1.standby", Assert.Single(_sim.Submitted).Control);
         Assert.Contains("com1.standby", _server.LastCommand);
+    }
+
+    [Fact]
+    public async Task LastCommandOnlyChangesWhenTheMessageIsACommand()
+    {
+        var (a, _) = await PairAsync();
+
+        // Segundo aparelho, com id próprio: o PairAsync usa sempre o hello do ipad-1.
+        var b = await ConnectAsync();
+        await SendAsync(b, """{"type":"hello","protocol":1,"app":"2G Pilot","device":{"id":"ipad-2","name":"iPad B"}}""");
+        await ExpectAsync(b, "pairing_required");
+        await SendAsync(b, $$"""{"type":"pair","code":"{{_codes.Generate()}}"}""");
+        await ExpectAsync(b, "paired");
+        await ExpectAsync(b, "welcome");
+        await ExpectAsync(b, "controls");
+        await ExpectAsync(b, "state");
+
+        await SendAsync(a, """{"type":"set","id":"a1","control":"com1.standby","value":118500000}""");
+        await ExpectAsync(a, "result");
+        await SendAsync(b, """{"type":"set","id":"b1","control":"com2.standby","value":121500000}""");
+        await ExpectAsync(b, "result");
+        Assert.Contains("com2.standby", _server.LastCommand);
+
+        // O type desconhecido não tem resposta. A mensagem inválida logo atrás tem, e a
+        // conexão trata na ordem: quando o error chega, o xyz já passou pelo Handle.
+        await SendAsync(a, """{"type":"xyz"}""");
+        await SendAsync(a, "{");
+        await ExpectAsync(a, "error");
+
+        Assert.Contains("com2.standby", _server.LastCommand);
     }
 
     [Fact]
@@ -2804,9 +2835,14 @@ public sealed class ControlServer : IDisposable
 
             var wasPaired = connection.Session.Phase == SessionPhase.Paired;
             var generation = Interlocked.Read(ref _changeGeneration);
+            var lastBefore = connection.Session.LastCommand;
             var output = connection.Session.Handle(Encoding.UTF8.GetString(buffer, 0, count));
             // Antes de enviar: quem recebe o result já pode ler o LastCommand.
-            if (connection.Session.LastCommand is { } last)
+            // Só copia se ESTA mensagem foi um comando: a sessão guarda o último dela, e um
+            // type desconhecido, uma mensagem inválida ou um rate_limited deste aparelho
+            // trariam de volta o comando antigo dele por cima do mais novo de outro aparelho.
+            // Cada comando gera uma string nova na sessão, então a referência basta.
+            if (connection.Session.LastCommand is { } last && !ReferenceEquals(last, lastBefore))
                 LastCommand = last;
 
             foreach (var message in output.Messages)
