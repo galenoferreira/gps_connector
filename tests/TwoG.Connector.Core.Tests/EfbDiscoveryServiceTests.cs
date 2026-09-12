@@ -37,6 +37,31 @@ public class EfbDiscoveryServiceTests
         return condition();
     }
 
+    /// <summary>
+    /// Só os destinos de loopback, isto é, os dos datagramas do próprio teste. Um
+    /// EFB real aberto na rede do desenvolvedor (2G Pilot no iPad ou no simulador)
+    /// também entra na lista, por anúncio ou Bonjour, e com razão: o serviço aceita
+    /// qualquer host. Quem não pode presumir a rede vazia é o teste.
+    /// </summary>
+    private static IPAddress[] LoopbackTargets(EfbDiscoveryService discovery) =>
+        discovery.Targets.Where(IPAddress.IsLoopback).ToArray();
+
+    /// <summary>
+    /// <see cref="EfbDiscoveryService.AnnouncementsReceived"/> soma anúncios de
+    /// qualquer host e não dá para filtrar. Com a rede quieta tem de ficar em zero;
+    /// se andou, foi um EFB real, que então está na lista fora do loopback.
+    /// </summary>
+    private static void AssertOnlyRealEfbsWereCounted(EfbDiscoveryService discovery)
+    {
+        if (discovery.AnnouncementsReceived == 0)
+            return;
+
+        // O contador sobe um instante antes do registro; esperar evita a corrida.
+        Assert.True(
+            WaitFor(() => discovery.Discovered.Any(e => !IPAddress.IsLoopback(e.Address)), 1000),
+            $"{discovery.AnnouncementsReceived} anúncio(s) contado(s) sem nenhum EFB real na lista");
+    }
+
     [Fact]
     public void Announcement_MakesTheAppShowUpAsAUnicastTarget()
     {
@@ -48,7 +73,7 @@ public class EfbDiscoveryServiceTests
         Assert.True(WaitFor(() =>
         {
             SendAnnouncement(RealPayload);
-            return discovery.Targets.Count > 0;
+            return LoopbackTargets(discovery).Length > 0;
         }), $"nenhum destino descoberto. Erro: {discovery.LastError}");
 
         Assert.Contains(IPAddress.Loopback, discovery.Targets);
@@ -78,8 +103,8 @@ public class EfbDiscoveryServiceTests
         }));
 
         Thread.Sleep(300);
-        Assert.Empty(discovery.Targets);
-        Assert.Equal(0, discovery.AnnouncementsReceived);
+        Assert.Empty(LoopbackTargets(discovery));
+        AssertOnlyRealEfbsWereCounted(discovery);
     }
 
     [Fact]
@@ -91,15 +116,17 @@ public class EfbDiscoveryServiceTests
         Assert.True(WaitFor(() =>
         {
             SendAnnouncement(RealPayload);
-            return discovery.Targets.Count > 0;
+            return LoopbackTargets(discovery).Length > 0;
         }));
 
+        // Sem filtro de propósito: Stop solta tudo, EFBs reais inclusive, e com as
+        // threads paradas a rede não tem como repor nada.
         discovery.Stop();
         Assert.Empty(discovery.Targets);
         Assert.Empty(discovery.Discovered);
     }
 
-    /// <summary>Sem nenhum app na rede, a lista fica vazia e nada explode.</summary>
+    /// <summary>Sem nenhum app anunciando daqui, a lista fica vazia e nada explode.</summary>
     [Fact]
     public void WithNoAppOnTheNetwork_ThereAreNoTargets()
     {
@@ -107,8 +134,8 @@ public class EfbDiscoveryServiceTests
         discovery.Start();
         Thread.Sleep(400);
 
-        Assert.Empty(discovery.Targets);
-        Assert.Equal(0, discovery.AnnouncementsReceived);
+        Assert.Empty(LoopbackTargets(discovery));
+        AssertOnlyRealEfbsWereCounted(discovery);
     }
 
     /// <summary>Start repetido não pode duplicar threads nem socket.</summary>
@@ -122,10 +149,10 @@ public class EfbDiscoveryServiceTests
         Assert.True(WaitFor(() =>
         {
             SendAnnouncement(RealPayload);
-            return discovery.Targets.Count > 0;
+            return LoopbackTargets(discovery).Length > 0;
         }));
 
-        Assert.Single(discovery.Targets);
+        Assert.Single(LoopbackTargets(discovery));
     }
 }
 
