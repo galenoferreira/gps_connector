@@ -34,6 +34,7 @@ public sealed class ControlServer : IDisposable
 
     private const int MaxRequestBytes = 8192;
     private const string WebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(2);
 
     private readonly ISimControl _control;
     private readonly PairedDeviceStore _devices;
@@ -78,7 +79,10 @@ public sealed class ControlServer : IDisposable
             .Select(c => new ConnectedDevice(c.Session.DeviceId, c.Session.DeviceName, c.Session.Phase == SessionPhase.Paired))
             .ToArray();
 
-    /// <summary>Uma conexão abriu, fechou ou pareou.</summary>
+    /// <summary>
+    /// Uma conexão abriu, fechou ou pareou. Disparado de threads do pool, nunca da interface;
+    /// uma exceção do assinante é ignorada e não afeta a conexão.
+    /// </summary>
     public event Action? ConnectionsChanged;
 
     public void Start(int port)
@@ -93,7 +97,7 @@ public sealed class ControlServer : IDisposable
             _cancellation = new CancellationTokenSource();
             LastError = null;
             _ = AcceptLoopAsync(listener, _cancellation.Token);
-            _ = PushLoopAsync(_cancellation.Token);
+            _ = PushLoopAsync(listener, _cancellation.Token);
         }
         catch (SocketException ex)
         {
@@ -104,7 +108,6 @@ public sealed class ControlServer : IDisposable
 
     public void Stop()
     {
-        _cancellation?.Cancel();
         try
         {
             _listener?.Stop();
@@ -115,11 +118,24 @@ public sealed class ControlServer : IDisposable
         }
         _listener = null;
 
-        foreach (var connection in _connections.Keys)
-            _ = connection.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connector encerrando");
-
-        _cancellation?.Dispose();
+        var cancellation = _cancellation;
         _cancellation = null;
+        if (cancellation is null)
+            return;
+
+        // Fecha com 1000 ANTES de cancelar: cada conexão tem uma leitura pendente com este
+        // token, e cancelar uma leitura aborta o WebSocket — o quadro de fechamento não sairia.
+        // Nada espera aqui (quem chama é a thread da interface): o Task.Run tira os fechamentos
+        // do contexto dela, e o cancelamento vem quando terminarem ou em 2 s, o que vier antes
+        // (um envio travado segura o lock de envio até o cancelamento).
+        var connections = _connections.Keys.ToArray();
+        var closing = Task.Run(() => Task.WhenAll(
+            connections.Select(c => c.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connector encerrando"))));
+        _ = Task.WhenAny(closing, Task.Delay(CloseTimeout)).ContinueWith(_ =>
+        {
+            cancellation.Cancel();
+            cancellation.Dispose();
+        }, TaskScheduler.Default);
     }
 
     public void Dispose() => Stop();
@@ -130,6 +146,18 @@ public sealed class ControlServer : IDisposable
             _ = connection.CloseAsync((WebSocketCloseStatus)CloseRevoked, "aparelho removido");
     }
 
+    private void RaiseConnectionsChanged()
+    {
+        try
+        {
+            ConnectionsChanged?.Invoke();
+        }
+        catch (Exception)
+        {
+            // Defeito do assinante não pode deixar conexão fantasma nem vaga presa.
+        }
+    }
+
     private async Task AcceptLoopAsync(TcpListener listener, CancellationToken token)
     {
         while (!token.IsCancellationRequested)
@@ -138,6 +166,15 @@ public sealed class ControlServer : IDisposable
             try
             {
                 client = await listener.AcceptTcpClientAsync(token);
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode != SocketError.OperationAborted
+                                             && !token.IsCancellationRequested
+                                             && ReferenceEquals(_listener, listener))
+            {
+                // Conexão da fila desfeita antes do accept (no Windows, ConnectionReset): um
+                // iPad que desistiu no meio do connect. Sair aqui deixaria o servidor surdo com
+                // IsRunning verdadeiro, e nada o reiniciaria.
+                continue;
             }
             catch (Exception)
             {
@@ -181,21 +218,21 @@ public sealed class ControlServer : IDisposable
                 {
                     Interlocked.Decrement(ref _slots);
                     await connection.SendAsync(ControlProtocol.Error(ControlErrors.Busy), token);
-                    await connection.CloseAsync((WebSocketCloseStatus)CloseBusy, "conexões esgotadas");
+                    await connection.CloseAndDrainAsync((WebSocketCloseStatus)CloseBusy, "conexões esgotadas");
                     return;
                 }
 
-                _connections.TryAdd(connection, 0);
-                ConnectionsChanged?.Invoke();
                 try
                 {
+                    _connections.TryAdd(connection, 0);
+                    RaiseConnectionsChanged();
                     await ReceiveLoopAsync(connection, token);
                 }
                 finally
                 {
                     _connections.TryRemove(connection, out _);
                     Interlocked.Decrement(ref _slots);
-                    ConnectionsChanged?.Invoke();
+                    RaiseConnectionsChanged();
                 }
             }
             catch (Exception)
@@ -274,7 +311,7 @@ public sealed class ControlServer : IDisposable
                     count += received.Count;
                     if (!received.EndOfMessage && count == buffer.Length)
                     {
-                        await connection.CloseAsync(WebSocketCloseStatus.MessageTooBig, "mensagem maior que 4 KB");
+                        await connection.CloseAndDrainAsync(WebSocketCloseStatus.MessageTooBig, "mensagem maior que 4 KB");
                         return;
                     }
                 }
@@ -326,12 +363,12 @@ public sealed class ControlServer : IDisposable
                 connection.Session.MarkWelcomeSent();
                 if (Interlocked.Read(ref _changeGeneration) != generation)
                     _dirty = true;
-                ConnectionsChanged?.Invoke();
+                RaiseConnectionsChanged();
             }
 
             if (output.CloseCode is int code)
             {
-                await connection.CloseAsync((WebSocketCloseStatus)code, output.CloseReason ?? "");
+                await connection.CloseAndDrainAsync((WebSocketCloseStatus)code, output.CloseReason ?? "");
                 return;
             }
         }
@@ -342,12 +379,14 @@ public sealed class ControlServer : IDisposable
     /// simulador avisou mudança, manda a lista de controles (se mudou) e o estado para cada
     /// aparelho pareado. Mudanças próximas viram um só state: no máximo 10 por segundo.
     /// </summary>
-    private async Task PushLoopAsync(CancellationToken token)
+    private async Task PushLoopAsync(TcpListener listener, CancellationToken token)
     {
         using var timer = new PeriodicTimer(_options.PushInterval);
         try
         {
-            while (await timer.WaitForNextTickAsync(token))
+            // Sai assim que o servidor para, sem esperar o cancelamento (que o Stop adia até os
+            // fechamentos): num Stop seguido de Start, dois laços mandariam state em dobro.
+            while (await timer.WaitForNextTickAsync(token) && ReferenceEquals(_listener, listener))
             {
                 if (!_dirty)
                     continue;
@@ -407,7 +446,10 @@ public sealed class ControlServer : IDisposable
             }
         }
 
-        /// <summary>Manda o quadro de fechamento sem esperar a resposta (a recepção cuida do resto).</summary>
+        /// <summary>
+        /// Manda o quadro de fechamento sem esperar a resposta. Serve quando o laço de recepção
+        /// continua lendo (Stop, aparelho removido) e é ele quem recebe a resposta do app.
+        /// </summary>
         public async Task CloseAsync(WebSocketCloseStatus status, string reason)
         {
             await _sendLock.WaitAsync();
@@ -415,7 +457,7 @@ public sealed class ControlServer : IDisposable
             {
                 if (Socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
                 {
-                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    using var timeout = new CancellationTokenSource(CloseTimeout);
                     await Socket.CloseOutputAsync(status, reason, timeout.Token);
                 }
             }
@@ -426,6 +468,32 @@ public sealed class ControlServer : IDisposable
             finally
             {
                 _sendLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Fecha por iniciativa do servidor quando ninguém mais vai ler a conexão (1009, 4002,
+        /// 4003, 4008): manda o quadro e descarta o que chegar até o fechamento do app, por no
+        /// máximo 2 s. Fechar o TCP com bytes não lidos (o resto da mensagem grande, um hello já
+        /// enviado) manda RST, e o RST pode fazer o app perder o código logo antes dele.
+        /// </summary>
+        public async Task CloseAndDrainAsync(WebSocketCloseStatus status, string reason)
+        {
+            await CloseAsync(status, reason);
+            var discard = new byte[1024];
+            using var timeout = new CancellationTokenSource(CloseTimeout);
+            try
+            {
+                while (Socket.State == WebSocketState.CloseSent)
+                {
+                    var received = await Socket.ReceiveAsync(discard.AsMemory(), timeout.Token);
+                    if (received.MessageType == WebSocketMessageType.Close)
+                        break;
+                }
+            }
+            catch (Exception)
+            {
+                // Prazo esgotado ou conexão caída: não há mais o que esperar.
             }
         }
     }

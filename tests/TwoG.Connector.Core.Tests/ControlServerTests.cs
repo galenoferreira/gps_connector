@@ -241,6 +241,61 @@ public class ControlServerTests : IDisposable
     }
 
     [Fact]
+    public async Task OversizedMessageKeepsTheTcpOpenUntilTheClientsClose()
+    {
+        // Em TCP cru para ver o que o servidor faz com o socket. Largar o TCP logo após o
+        // quadro 1009, com o resto da mensagem ainda não lido, manda RST no Windows, e o RST
+        // pode apagar o quadro no app antes de ele ser lido.
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync("127.0.0.1", _server.Port);
+        var stream = tcp.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(
+            "GET /control HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"));
+
+        // Quadro de texto mascarado (máscara zero: o payload vai como está), 16 vezes o limite.
+        var payload = ControlServer.MaxMessageBytes * 16;
+        var frame = new List<byte> { 0x81, 0xFF };
+        frame.AddRange(BitConverter.GetBytes((long)payload).Reverse());
+        frame.AddRange(new byte[4]);
+        frame.AddRange(Enumerable.Repeat((byte)'x', payload));
+        await stream.WriteAsync(frame.ToArray(), Timeout());
+
+        // Lê a resposta 101 e o quadro de fechamento inteiro.
+        var received = new List<byte>();
+        var buffer = new byte[1024];
+        int headerEnd;
+        while ((headerEnd = IndexOfHeaderEnd(received)) < 0 || received.Count < headerEnd + 2
+               || received.Count < headerEnd + 2 + received[headerEnd + 1])
+        {
+            var read = await stream.ReadAsync(buffer, Timeout());
+            Assert.NotEqual(0, read);
+            received.AddRange(buffer.AsSpan(0, read).ToArray());
+        }
+        Assert.Equal(0x88, received[headerEnd]);
+        Assert.Equal((int)WebSocketCloseStatus.MessageTooBig, (received[headerEnd + 2] << 8) | received[headerEnd + 3]);
+
+        // O servidor espera a resposta do app: nada de EOF por enquanto.
+        var pending = stream.ReadAsync(buffer).AsTask();
+        Assert.NotSame(pending, await Task.WhenAny(pending, Task.Delay(300)));
+
+        // Fechamento do cliente (mascarado, código 1000): agora sim o servidor solta o TCP.
+        await stream.WriteAsync(new byte[] { 0x88, 0x82, 0, 0, 0, 0, 0x03, 0xE8 }, Timeout());
+        Assert.Same(pending, await Task.WhenAny(pending, Task.Delay(5000)));
+        Assert.Equal(0, await pending);
+    }
+
+    private static int IndexOfHeaderEnd(List<byte> bytes)
+    {
+        for (var i = 3; i < bytes.Count; i++)
+        {
+            if (bytes[i - 3] == '\r' && bytes[i - 2] == '\n' && bytes[i - 1] == '\r' && bytes[i] == '\n')
+                return i + 1;
+        }
+        return -1;
+    }
+
+    [Fact]
     public async Task InvalidJsonKeepsTheConnectionOpen()
     {
         var ws = await ConnectAsync();
@@ -267,6 +322,35 @@ public class ControlServerTests : IDisposable
         var read = await stream.ReadAsync(buffer, Timeout());
 
         Assert.StartsWith($"HTTP/1.1 {status}", Encoding.ASCII.GetString(buffer, 0, read));
+    }
+
+    [Fact]
+    public async Task StoppingClosesOpenConnectionsWith1000()
+    {
+        var (paired, _) = await PairAsync();
+        var waitingHello = await ConnectAsync();
+
+        _server.Stop();
+
+        Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await ExpectCloseAsync(paired));
+        Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await ExpectCloseAsync(waitingHello));
+    }
+
+    [Fact]
+    public async Task ThrowingSubscriberDoesNotLeakTheConnection()
+    {
+        _server.ConnectionsChanged += () => throw new InvalidOperationException("assinante com defeito");
+
+        var (ws, _) = await PairAsync();   // o aviso do pareamento também não pode derrubar a conexão
+        await SendAsync(ws, """{"type":"set","id":"a1","control":"com1.standby","value":118500000}""");
+        await ExpectAsync(ws, "result");
+
+        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (_server.Connected.Count > 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(20);
+
+        Assert.Empty(_server.Connected);
     }
 
     [Fact]
