@@ -1710,7 +1710,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consome: `ProductIdentity.ExeFileName`, `ProductIdentity.SetupFileName`.
 - Produz:
   - `enum UpdateTrigger { Startup, Exit, Manual, Periodic }`, `enum UpdateDecision { Apply, ConfirmFirst, Skip }`, `UpdatePolicy.MaxAttempts = 2`, `UpdatePolicy.Decide(UpdateTrigger trigger, bool inFlight, int attemptsSoFar) : UpdateDecision`
-  - `sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts)`
+  - `sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts)` com `IsFor(InstallKind) : bool` — o arquivo baixado é o `AssetFor` deste tipo (ignora caixa); `ReadOnly` nunca
   - `PendingUpdateStore.StateFileName`, `Load(string updatesDir) : PendingUpdate?`, `Save(string updatesDir, PendingUpdate)`, `Clear(string updatesDir)`, `FileIsIntact(PendingUpdate) : bool`, `RecordAttempt(string updatesDir, PendingUpdate) : PendingUpdate`
   - `enum InstallKind { Installer, Portable, ReadOnly }`, `InstallKindDetector.Detect(IEnumerable<string> fileNamesInExeDir, bool exeDirWritable) : InstallKind`, `InstallKindDetector.AssetFor(InstallKind) : string?`
 
@@ -2935,6 +2935,12 @@ internal sealed class UpdateService : IDisposable
             return false;
         }
 
+        // A pasta updates é de todas as cópias do usuário: o que outra cópia baixou
+        // (setup × exe avulso) não serve aqui e não pode gastar as tentativas dela.
+        // A próxima verificação desta cópia troca pelo arquivo certo.
+        if (!pending.IsFor(Kind))
+            return false;
+
         switch (UpdatePolicy.Decide(trigger, inFlight, pending.Attempts))
         {
             case UpdateDecision.Skip:
@@ -2953,9 +2959,12 @@ internal sealed class UpdateService : IDisposable
             return false;
         }
 
-        Pending = PendingUpdateStore.RecordAttempt(_updatesDir, pending);
         try
         {
+            // Dentro do try: se a tentativa não puder ser gravada, não instala (sem o
+            // contador, uma instalação que falha se repetiria a cada partida) e não
+            // lança — no gatilho Startup isto roda antes de a janela existir.
+            Pending = PendingUpdateStore.RecordAttempt(_updatesDir, pending);
             UpdateInstaller.Launch(pending, Kind, _exePath, relaunchArgs, relaunch, releaseMutex);
             return true;
         }
@@ -3288,7 +3297,7 @@ Métodos novos:
 
         var pending = updates.Pending;
         var latest = updates.LatestSeen;
-        if (pending is not null && updates.Kind != InstallKind.ReadOnly)
+        if (pending is not null && pending.IsFor(updates.Kind))    // a de outra cópia não instala aqui
         {
             HasUpdateBanner = true;
             CanApplyUpdateNow = true;

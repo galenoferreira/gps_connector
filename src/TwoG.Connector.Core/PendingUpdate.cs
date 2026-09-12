@@ -4,7 +4,20 @@ using System.Text.Json;
 namespace TwoG.Connector.Core;
 
 /// <summary>Atualização baixada e verificada, aguardando um momento seguro para instalar.</summary>
-public sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts);
+public sealed record PendingUpdate(string Version, string AssetName, string FilePath, string Sha256, int Attempts)
+{
+    /// <summary>
+    /// Se o arquivo baixado serve para uma cópia deste tipo. A pasta updates é uma só
+    /// por usuário, e a cópia instalada e uma avulsa enxergam a pendência uma da
+    /// outra: sem esta conferência a avulsa se trocaria pelo setup, e a instalada
+    /// rodaria o exe avulso como se fosse o setup. Pasta sem escrita não instala nada.
+    /// Confira antes de <see cref="PendingUpdateStore.RecordAttempt"/>, para a pendência
+    /// de outra cópia não gastar as tentativas dela.
+    /// </summary>
+    public bool IsFor(InstallKind kind) =>
+        InstallKindDetector.AssetFor(kind) is { } asset
+        && string.Equals(AssetName, asset, StringComparison.OrdinalIgnoreCase);
+}
 
 /// <summary>Persiste a atualização pendente em <c>updates/pending.json</c>.</summary>
 public static class PendingUpdateStore

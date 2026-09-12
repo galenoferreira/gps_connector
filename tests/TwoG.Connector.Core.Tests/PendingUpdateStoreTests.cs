@@ -66,6 +66,23 @@ public class PendingUpdateStoreTests
         Assert.ThrowsAny<IOException>(() => PendingUpdateStore.RecordAttempt(updates, pending));
     }
 
+    // A pasta updates é uma só por usuário: a cópia instalada e uma avulsa enxergam
+    // a pendência uma da outra.
+    [Theory]
+    [InlineData("2G-Connector-Setup.exe", InstallKind.Installer, true)]
+    [InlineData("2g-connector-setup.EXE", InstallKind.Installer, true)]
+    [InlineData("2G-Connector.exe", InstallKind.Portable, true)]
+    [InlineData("2G-Connector.exe", InstallKind.Installer, false)]        // rodaria o exe como se fosse o setup
+    [InlineData("2G-Connector-Setup.exe", InstallKind.Portable, false)]   // trocaria o exe avulso pelo setup
+    [InlineData("2G-Connector.exe", InstallKind.ReadOnly, false)]         // sem escrita não instala nada
+    [InlineData("2G-Connector-Setup.exe", InstallKind.ReadOnly, false)]
+    public void OnlyTheAssetOfThisInstallKindIsInstallable(string asset, InstallKind kind, bool expected)
+    {
+        var pending = new PendingUpdate("1.5.0", asset, "arquivo", "hash", Attempts: 0);
+
+        Assert.Equal(expected, pending.IsFor(kind));
+    }
+
     [Fact]
     public void FileIsIntactDetectsLocalChanges()
     {
