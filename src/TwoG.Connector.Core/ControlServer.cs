@@ -124,13 +124,19 @@ public sealed class ControlServer : IDisposable
             return;
 
         // Fecha com 1000 ANTES de cancelar: cada conexão tem uma leitura pendente com este
-        // token, e cancelar uma leitura aborta o WebSocket — o quadro de fechamento não sairia.
+        // token, e cancelar uma leitura aborta o WebSocket — o quadro de fechamento não sairia,
+        // nem a resposta do app seria lida (soltar o TCP com ela em trânsito manda RST).
         // Nada espera aqui (quem chama é a thread da interface): o Task.Run tira os fechamentos
-        // do contexto dela, e o cancelamento vem quando terminarem ou em 2 s, o que vier antes
-        // (um envio travado segura o lock de envio até o cancelamento).
+        // do contexto dela, e o cancelamento vem quando o laço de recepção de cada uma recebeu
+        // o Close do app e a soltou, ou em 2 s, o que vier antes (um app que não responde, ou
+        // um envio travado, que segura o lock de envio até o cancelamento).
         var connections = _connections.Keys.ToArray();
-        var closing = Task.Run(() => Task.WhenAll(
-            connections.Select(c => c.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connector encerrando"))));
+        var closing = Task.Run(async () =>
+        {
+            await Task.WhenAll(connections.Select(
+                c => c.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connector encerrando")));
+            await Task.WhenAll(connections.Select(c => c.Finished));
+        });
         _ = Task.WhenAny(closing, Task.Delay(CloseTimeout)).ContinueWith(_ =>
         {
             cancellation.Cancel();
@@ -233,6 +239,7 @@ public sealed class ControlServer : IDisposable
                     _connections.TryRemove(connection, out _);
                     Interlocked.Decrement(ref _slots);
                     RaiseConnectionsChanged();
+                    connection.MarkFinished();
                 }
             }
             catch (Exception)
@@ -329,6 +336,15 @@ public sealed class ControlServer : IDisposable
                 return;
             }
 
+            if (connection.Socket.State != WebSocketState.Open)
+            {
+                // O servidor já mandou o fechamento (Stop, aparelho removido) e este quadro saiu
+                // do app antes de ele o ver: não vira comando, senão o set de um aparelho removido
+                // chegaria ao simulador. Descarta até o Close do app, por no máximo 2 s.
+                await connection.DrainAsync();
+                return;
+            }
+
             if (received.MessageType != WebSocketMessageType.Text)
             {
                 await connection.SendAsync(ControlProtocol.Error(ControlErrors.InvalidMessage), token);
@@ -413,6 +429,7 @@ public sealed class ControlServer : IDisposable
     private sealed class Connection(WebSocket socket, ControlSession session)
     {
         private readonly SemaphoreSlim _sendLock = new(1, 1);
+        private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public WebSocket Socket { get; } = socket;
 
@@ -420,6 +437,11 @@ public sealed class ControlServer : IDisposable
 
         /// <summary>Última lista de controles enviada a este aparelho.</summary>
         public string? LastControls { get; set; }
+
+        /// <summary>Completa quando o laço de recepção terminou e a conexão saiu da lista.</summary>
+        public Task Finished => _finished.Task;
+
+        public void MarkFinished() => _finished.TrySetResult();
 
         public async Task SendAsync(string json, CancellationToken token)
         {
@@ -448,7 +470,8 @@ public sealed class ControlServer : IDisposable
 
         /// <summary>
         /// Manda o quadro de fechamento sem esperar a resposta. Serve quando o laço de recepção
-        /// continua lendo (Stop, aparelho removido) e é ele quem recebe a resposta do app.
+        /// continua lendo (Stop, aparelho removido) e é ele quem recebe a resposta do app: um
+        /// quadro de dados que chegue antes dela é descartado (<see cref="DrainAsync"/>).
         /// </summary>
         public async Task CloseAsync(WebSocketCloseStatus status, string reason)
         {
@@ -480,6 +503,12 @@ public sealed class ControlServer : IDisposable
         public async Task CloseAndDrainAsync(WebSocketCloseStatus status, string reason)
         {
             await CloseAsync(status, reason);
+            await DrainAsync();
+        }
+
+        /// <summary>Com o fechamento já enviado, descarta o que chegar até o Close do app, por no máximo 2 s.</summary>
+        public async Task DrainAsync()
+        {
             var discard = new byte[1024];
             using var timeout = new CancellationTokenSource(CloseTimeout);
             try

@@ -221,6 +221,61 @@ public class ControlServerTests : IDisposable
     }
 
     [Fact]
+    public async Task CommandInFlightAfterRemovalNeverReachesTheSimulator()
+    {
+        var (ws, _) = await PairAsync();
+
+        _devices.Remove("ipad-1");
+        // Sai do app antes de ele ler o 4001: o servidor já fechou e não pode mais executá-lo.
+        await SendAsync(ws, """{"type":"set","id":"a1","control":"com1.standby","value":118500000}""");
+        Assert.Equal(ControlServer.CloseRevoked, await ExpectCloseAsync(ws));
+
+        // E continua esperando a resposta do app, em vez de soltar o TCP com o set.
+        await Task.Delay(300);
+        lock (_sim.Submitted)
+            Assert.Empty(_sim.Submitted);
+        Assert.Single(_server.Connected);
+
+        await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
+        await WaitForNoConnectionsAsync();
+    }
+
+    [Fact]
+    public async Task StoppingWaitsForTheClientsCloseBeforeReleasingTheConnection()
+    {
+        var (ws, _) = await PairAsync();
+
+        _server.Stop();
+        Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await ExpectCloseAsync(ws));
+
+        // O 1000 já saiu, mas o app ainda não respondeu: a leitura não pode ter sido cancelada.
+        await Task.Delay(300);
+        Assert.Single(_server.Connected);
+
+        await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
+        await WaitForNoConnectionsAsync();
+    }
+
+    [Fact]
+    public async Task StoppingGivesUpOnASilentClientAfterTwoSeconds()
+    {
+        var (ws, _) = await PairAsync();
+
+        _server.Stop();
+        Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await ExpectCloseAsync(ws));
+
+        await WaitForNoConnectionsAsync();   // o app nunca responde: o prazo de 2 s solta a conexão
+    }
+
+    private async Task WaitForNoConnectionsAsync()
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (_server.Connected.Count > 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(20);
+        Assert.Empty(_server.Connected);
+    }
+
+    [Fact]
     public async Task SilentConnectionIsClosedAfterTheHelloTimeout()
     {
         var ws = await ConnectAsync();
