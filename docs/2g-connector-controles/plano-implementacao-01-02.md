@@ -2232,6 +2232,7 @@ Decisões de implementação, todas vindas do 01:
 - **A vaga de conexão é reservada com `Interlocked` antes da sessão.** Com a checagem e a inclusão separadas, duas conexões simultâneas passariam juntas pelo limite.
 - **Ping e prazo de pong vêm do próprio `WebSocket`** (`KeepAliveInterval` + `KeepAliveTimeout`), somando os 45 s do 01.
 - **O envio de estado é feito por um laço único** em `PushInterval`: quando o `ISimControl` avisa mudança, cada conexão pareada recebe `controls` (se a lista mudou) e `state`. Isso limita a 10 `state` por segundo e junta mudanças próximas. O filtro é `Session.ReadyForPush`, não `Phase == Paired`: a fase muda dentro do `Handle`, antes de `paired`/`welcome` irem para a rede, e o laço de recepção só chama `MarkWelcomeSent()` depois de enviar o pacote todo. Para não perder o que mudou nessa janela: `LastControls` guarda a lista que foi no pacote (não uma recalculada depois), e `_dirty` só é remarcado se o contador `_changeGeneration` andou desde o `Handle` — marcar sempre mandaria um `state` extra a cada pareamento, na frente do `result`/`controls`/`state` que os testes esperam.
+- **O nome do simulador é conferido a cada tick do laço de envio**, contra o último visto (`_lastSimulatorName`, que começa com o nome do construtor para não gerar um `state` extra no primeiro tick). Ele pode mudar sem `Changed`: na Tarefa 9 o `CompositeSimControl` passa a responder com o nome da fonte ativa, e o X-Plane, que não tem `ISimControl`, conecta e cai sem avisar ninguém. Nome diferente conta como aviso do simulador (anda `_changeGeneration` e marca `_dirty`), então sai um `state` com o nome novo, ou com `null` quando ele fecha, como o 01 manda "a cada mudança".
 - **Um envio de cada vez por conexão** (`SemaphoreSlim`), porque o `WebSocket` não aceita dois `SendAsync` simultâneos.
 - **`LastCommand` do servidor só muda quando a mensagem foi um comando.** `ControlSession.LastCommand` guarda o último da sessão; copiar depois de qualquer `Handle` faria um `type` desconhecido, uma mensagem inválida ou um `rate_limited` do aparelho A trazer de volta o comando antigo de A por cima do mais novo de B. O laço guarda a referência antes do `Handle` e só copia se ela mudou (cada comando gera uma string nova na sessão).
 - **`Stop()` fecha com 1000 antes de cancelar.** Cada conexão tem um `ReceiveAsync` pendente com o token do servidor, e cancelar uma leitura pendente aborta o `WebSocket`: cancelando primeiro, o quadro de fechamento nunca sairia. Os fechamentos rodam num `Task.Run` (fora do contexto da interface, que é quem chama o `Stop`) e o cancelamento vem quando o laço de recepção de cada conexão recebeu o `Close` do app e a soltou (`Connection.Finished`), ou em 2 s. Cancelar assim que o 1000 é escrito abortaria a leitura antes de a resposta chegar (numa Wi-Fi, um RTT), e o TCP seria solto com ela em trânsito. Nada bloqueia quem chamou. Os laços de accept e de envio saem na hora, porque o listener deixou de ser o atual: num `Stop` seguido de `Start` não há dois laços mandando `state`.
@@ -2438,6 +2439,19 @@ public class ControlServerTests : IDisposable
         var controls = await ExpectAsync(ws, "controls");
         Assert.Equal(3, controls.GetProperty("controls").GetArrayLength());
         await ExpectAsync(ws, "state");
+    }
+
+    [Fact]
+    public async Task StateIsPushedWhenOnlyTheSimulatorNameChanges()
+    {
+        // Fonte sem ISimControl (X-Plane) conectando e caindo: o nome muda sem Changed.
+        var (ws, _) = await PairAsync();
+
+        _sim.SimulatorName = "X-Plane 12";
+        Assert.Equal("X-Plane 12", (await ExpectAsync(ws, "state")).GetProperty("simulator").GetString());
+
+        _sim.SimulatorName = null;
+        Assert.Equal(JsonValueKind.Null, (await ExpectAsync(ws, "state")).GetProperty("simulator").ValueKind);
     }
 
     [Fact]
@@ -2867,6 +2881,7 @@ public sealed class ControlServer : IDisposable
     private int _slots;
     private volatile bool _dirty;
     private long _changeGeneration;   // conta os avisos do simulador; ver o pareamento no laço de recepção
+    private string? _lastSimulatorName;   // só o laço de envio lê e grava depois do construtor
 
     public ControlServer(ISimControl control, PairedDeviceStore devices, PairingCodes codes,
                          string connectorVersion, ControlServerOptions? options = null)
@@ -2876,6 +2891,7 @@ public sealed class ControlServer : IDisposable
         _codes = codes;
         _connectorVersion = connectorVersion;
         _options = options ?? new ControlServerOptions();
+        _lastSimulatorName = control.SimulatorName;
         _control.Changed += () =>
         {
             Interlocked.Increment(ref _changeGeneration);
@@ -3244,6 +3260,10 @@ public sealed class ControlServer : IDisposable
     /// Laço único de envio: a cada <see cref="ControlServerOptions.PushInterval"/>, se o
     /// simulador avisou mudança, manda a lista de controles (se mudou) e o estado para cada
     /// aparelho pareado. Mudanças próximas viram um só state: no máximo 10 por segundo.
+    /// O nome do simulador é conferido a cada tick, porque pode mudar sem Changed: uma fonte
+    /// sem ISimControl (o X-Plane) conecta ou cai e só o nome do state muda. Sem isso, um app
+    /// pareado antes de o X-Plane abrir ficaria com null, e um pareado com ele aberto ficaria
+    /// com o nome depois de ele fechar.
     /// </summary>
     private async Task PushLoopAsync(TcpListener listener, CancellationToken token)
     {
@@ -3254,6 +3274,15 @@ public sealed class ControlServer : IDisposable
             // fechamentos): num Stop seguido de Start, dois laços mandariam state em dobro.
             while (await timer.WaitForNextTickAsync(token) && ReferenceEquals(_listener, listener))
             {
+                // Conta como aviso do simulador: um pareamento em curso vê o contador andar.
+                var name = _control.SimulatorName;
+                if (name != _lastSimulatorName)
+                {
+                    _lastSimulatorName = name;
+                    Interlocked.Increment(ref _changeGeneration);
+                    _dirty = true;
+                }
+
                 if (!_dirty)
                     continue;
                 _dirty = false;
@@ -4415,6 +4444,8 @@ internal sealed class CompositeSimControl : ISimControl
     /// <summary>
     /// Nome da fonte ativa, tenha ela Control ou não: o X-Plane conectado aparece pelo nome,
     /// com controls [] e radios {}. O null fica para "sem simulador conectado" (spec 01).
+    /// Uma fonte sem Control conecta e cai sem disparar Changed; quem percebe a troca do nome
+    /// e manda o state é o laço de envio do ControlServer, que o confere a cada tick.
     /// </summary>
     public string? SimulatorName => _active()?.SimulatorName;
 

@@ -24,6 +24,8 @@ internal sealed class CompositeSimControl : ISimControl
     /// <summary>
     /// Nome da fonte ativa, tenha ela Control ou não: o X-Plane conectado aparece pelo nome,
     /// com controls [] e radios {}. O null fica para "sem simulador conectado" (spec 01).
+    /// Uma fonte sem Control conecta e cai sem disparar Changed; quem percebe a troca do nome
+    /// e manda o state é o laço de envio do ControlServer, que o confere a cada tick.
     /// </summary>
     public string? SimulatorName => _active()?.SimulatorName;
 

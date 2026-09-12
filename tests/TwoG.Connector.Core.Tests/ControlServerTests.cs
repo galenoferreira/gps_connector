@@ -192,6 +192,19 @@ public class ControlServerTests : IDisposable
     }
 
     [Fact]
+    public async Task StateIsPushedWhenOnlyTheSimulatorNameChanges()
+    {
+        // Fonte sem ISimControl (X-Plane) conectando e caindo: o nome muda sem Changed.
+        var (ws, _) = await PairAsync();
+
+        _sim.SimulatorName = "X-Plane 12";
+        Assert.Equal("X-Plane 12", (await ExpectAsync(ws, "state")).GetProperty("simulator").GetString());
+
+        _sim.SimulatorName = null;
+        Assert.Equal(JsonValueKind.Null, (await ExpectAsync(ws, "state")).GetProperty("simulator").ValueKind);
+    }
+
+    [Fact]
     public async Task FifthConnectionGetsBusyAndCloses4003()
     {
         // As quatro mandam hello: sem ele, o prazo curto do teste as fecharia antes da quinta.

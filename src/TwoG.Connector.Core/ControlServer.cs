@@ -47,6 +47,7 @@ public sealed class ControlServer : IDisposable
     private int _slots;
     private volatile bool _dirty;
     private long _changeGeneration;   // conta os avisos do simulador; ver o pareamento no laço de recepção
+    private string? _lastSimulatorName;   // só o laço de envio lê e grava depois do construtor
 
     public ControlServer(ISimControl control, PairedDeviceStore devices, PairingCodes codes,
                          string connectorVersion, ControlServerOptions? options = null)
@@ -56,6 +57,7 @@ public sealed class ControlServer : IDisposable
         _codes = codes;
         _connectorVersion = connectorVersion;
         _options = options ?? new ControlServerOptions();
+        _lastSimulatorName = control.SimulatorName;
         _control.Changed += () =>
         {
             Interlocked.Increment(ref _changeGeneration);
@@ -424,6 +426,10 @@ public sealed class ControlServer : IDisposable
     /// Laço único de envio: a cada <see cref="ControlServerOptions.PushInterval"/>, se o
     /// simulador avisou mudança, manda a lista de controles (se mudou) e o estado para cada
     /// aparelho pareado. Mudanças próximas viram um só state: no máximo 10 por segundo.
+    /// O nome do simulador é conferido a cada tick, porque pode mudar sem Changed: uma fonte
+    /// sem ISimControl (o X-Plane) conecta ou cai e só o nome do state muda. Sem isso, um app
+    /// pareado antes de o X-Plane abrir ficaria com null, e um pareado com ele aberto ficaria
+    /// com o nome depois de ele fechar.
     /// </summary>
     private async Task PushLoopAsync(TcpListener listener, CancellationToken token)
     {
@@ -434,6 +440,15 @@ public sealed class ControlServer : IDisposable
             // fechamentos): num Stop seguido de Start, dois laços mandariam state em dobro.
             while (await timer.WaitForNextTickAsync(token) && ReferenceEquals(_listener, listener))
             {
+                // Conta como aviso do simulador: um pareamento em curso vê o contador andar.
+                var name = _control.SimulatorName;
+                if (name != _lastSimulatorName)
+                {
+                    _lastSimulatorName = name;
+                    Interlocked.Increment(ref _changeGeneration);
+                    _dirty = true;
+                }
+
                 if (!_dirty)
                     continue;
                 _dirty = false;
