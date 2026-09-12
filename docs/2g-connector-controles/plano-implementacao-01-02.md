@@ -57,8 +57,9 @@
 | `Services/ControlService.cs` | Novo: junta servidor, códigos, aparelhos e anúncio; liga e desliga pelas Configurações |
 | `Services/ISimSource.cs`, `CompositeSimSource.cs`, `XPlaneService.cs`, `SimConnectService.cs` | Capacidade `Control` e integração com a thread do SimConnect |
 | `Services/IXgpsBroadcaster.cs`, `XgpsBroadcaster.cs` | `SendToEach`: sentença diferente por destino |
+| `Services/ControlAnnouncer.cs` | Novo: anúncio `2GCTL` a cada 5 s, com o IP de saída de cada destino |
 | `Configuration/AppSettings.cs`, `SettingsService.cs` | `AllowControl`, `ControlPort` |
-| `App.xaml.cs`, `ViewModels/MainViewModel.cs`, `MainWindow.xaml` | Ligação e interface |
+| `App.xaml.cs`, `ViewModels/MainViewModel.cs`, `MainWindow.xaml`, `MainWindow.xaml.cs` | Ligação e interface |
 
 **Testes — `tests/TwoG.Connector.Core.Tests/`:** `RadioCatalogTests.cs`, `RadioConversionsTests.cs`, `ControlProtocolTests.cs`, `PairingCodesTests.cs`, `PairedDeviceStoreTests.cs`, `ControlSessionTests.cs`, `ControlServerTests.cs`, `ControlAnnouncementTests.cs`, e o helper `FakeSimControl.cs`.
 
@@ -690,8 +691,54 @@ public class ControlProtocolTests
     public void LongDeviceNameIsCutTo64()
     {
         var name = new string('x', 100);
-        var hello = Assert.IsType<HelloMessage>(Parse($$"""{"type":"hello","protocol":1,"device":{"id":"a","name":"{{name}}"}}"""));
+        var hello = Assert.IsType<HelloMessage>(Parse($$$"""{"type":"hello","protocol":1,"device":{"id":"a","name":"{{{name}}}"}}"""));
         Assert.Equal(64, hello.DeviceName.Length);
+    }
+
+    [Fact]
+    public void LongDeviceNameCutDoesNotSplitACharacter()
+    {
+        // Emoji fora do BMP (par de surrogates) nas posições 63/64: o corte cru deixaria só
+        // o surrogate alto, e o nome viraria UTF-16 inválido rumo ao arquivo e à UI.
+        var prefix = new string('x', 63);
+        var hello = Assert.IsType<HelloMessage>(Parse(
+            $$$"""{"type":"hello","protocol":1,"device":{"id":"a","name":"{{{prefix}}}🛩 do Galeno"}}"""));
+
+        Assert.True(hello.DeviceName.Length <= ControlProtocol.MaxDeviceNameLength);
+        Assert.False(char.IsHighSurrogate(hello.DeviceName[^1]));
+        AssertValidUtf16(hello.DeviceName);
+        Assert.Equal(prefix, hello.DeviceName);
+    }
+
+    [Fact]
+    public void LongDeviceNameCutKeepsACharacterThatFits()
+    {
+        var prefix = new string('x', 62);
+        var hello = Assert.IsType<HelloMessage>(Parse(
+            $$$"""{"type":"hello","protocol":1,"device":{"id":"a","name":"{{{prefix}}}🛩 do Galeno"}}"""));
+
+        Assert.Equal(prefix + "🛩", hello.DeviceName);
+        AssertValidUtf16(hello.DeviceName);
+    }
+
+    private static void AssertValidUtf16(string text)
+    {
+        var strict = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        strict.GetBytes(text);   // lança EncoderFallbackException se houver surrogate solto
+    }
+
+    [Theory]
+    [InlineData("""{"type":"hello","protocol":2}""", 2)]
+    [InlineData("""{"type":"hello","protocol":2,"device":"iPad"}""", 2)]
+    [InlineData("""{"type":"hello","protocol":0,"device":{"id":"a","name":"b"}}""", 0)]
+    [InlineData("""{"type":"hello","protocol":99999999999}""", 0)]
+    [InlineData("""{"type":"hello","protocol":1.5}""", 0)]
+    public void HelloWithOtherProtocolIsReadWithoutCheckingTheRest(string json, int expected)
+    {
+        // A sessão precisa ver a versão para responder protocol_unsupported e fechar com 4002.
+        var hello = Assert.IsType<HelloMessage>(Parse(json));
+        Assert.Equal(expected, hello.Protocol);
+        Assert.NotEqual(ControlProtocol.Version, hello.Protocol);
     }
 
     [Fact]
@@ -741,9 +788,21 @@ public class ControlProtocolTests
     [InlineData("""{"type":"set","id":"a","control":"com1.active"}""")]
     [InlineData("""{"type":"set","control":"com1.active","value":1}""")]
     [InlineData("""{"type":"action","id":"","control":"com1.swap"}""")]
+    // Escape de surrogate solto: o JSON é válido, mas o texto não é UTF-16 válido.
+    [InlineData("""{"type":"\uDC00"}""")]
+    [InlineData("""{"type":"pair","code":"\uD800"}""")]
+    [InlineData("""{"type":"hello","protocol":1,"device":{"id":"a","name":"\uD800x"}}""")]
     public void RejectsMalformedMessagesWithoutThrowing(string json)
     {
         Assert.False(ControlProtocol.TryParse(json, out var message));
+        Assert.Null(message);
+    }
+
+    [Fact]
+    public void RejectsLoneSurrogateInInputWithoutThrowing()
+    {
+        // Caractere (não escape) de surrogate solto na própria string de entrada.
+        Assert.False(ControlProtocol.TryParse("{\"type\":\"pair\",\"code\":\"" + '\uD800' + "\"}", out var message));
         Assert.Null(message);
     }
 
@@ -893,18 +952,28 @@ public static class ControlProtocol
             };
             return message is not null;
         }
-        catch (JsonException)
+        // JsonException: JSON inválido. InvalidOperationException: escape de surrogate solto
+        // (\uD800), que o leitor aceita mas GetString() recusa. ArgumentException: UTF-16
+        // inválido na própria string de entrada, que não transcodifica para UTF-8.
+        catch (Exception e) when (e is JsonException or InvalidOperationException or ArgumentException)
         {
+            message = null;
             return false;
         }
     }
 
     private static HelloMessage? ParseHello(JsonElement root)
     {
-        if (!root.TryGetProperty("protocol", out var protocolEl)
-            || protocolEl.ValueKind != JsonValueKind.Number
-            || !protocolEl.TryGetInt32(out var protocol))
+        if (!root.TryGetProperty("protocol", out var protocolEl) || protocolEl.ValueKind != JsonValueKind.Number)
             return null;
+
+        // Versão é a PRIMEIRA coisa a olhar: outra versão pode ter mudado o resto do hello, e
+        // o app precisa receber protocol_unsupported (4002), não invalid_message. Número que
+        // não cabe em Int32 (decimal, gigante) também não é versão que falamos: vira 0.
+        if (!protocolEl.TryGetInt32(out var protocol))
+            protocol = 0;
+        if (protocol != Version)
+            return new HelloMessage(protocol, "", "", null);
 
         if (!root.TryGetProperty("device", out var device) || device.ValueKind != JsonValueKind.Object
             || !TryString(device, "id", out var id) || id.Length == 0 || id.Length > MaxDeviceIdLength
@@ -915,7 +984,13 @@ public static class ControlProtocol
         if (name.Length == 0)
             return null;
         if (name.Length > MaxDeviceNameLength)
+        {
+            // O corte conta unidades UTF-16: se partir um par de surrogates (emoji), descarta
+            // a metade alta que sobrou. Basta isso porque a entrada já é UTF-16 válido.
             name = name[..MaxDeviceNameLength];
+            if (char.IsHighSurrogate(name[^1]))
+                name = name[..^1];
+        }
 
         var token = TryString(root, "token", out var t) && t.Length > 0 ? t : null;
         return new HelloMessage(protocol, id, name, token);
@@ -4623,7 +4698,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modificar: `src/TwoG.Connector/Configuration/AppSettings.cs`, `Configuration/SettingsService.cs`
 - Modificar: `src/TwoG.Connector/App.xaml.cs`
 - Modificar: `src/TwoG.Connector/ViewModels/MainViewModel.cs`
-- Modificar: `src/TwoG.Connector/MainWindow.xaml`
+- Modificar: `src/TwoG.Connector/MainWindow.xaml`, `src/TwoG.Connector/MainWindow.xaml.cs`
 
 **Interfaces:**
 - Consome: `ControlServer`, `PairingCodes`, `PairedDeviceStore` (Core); `ControlAnnouncer`, `IXgpsBroadcaster` (Tarefa 8); `ISimSource.Control` (Tarefa 9); `UpdateService.CurrentVersion` (existente).
@@ -4943,7 +5018,7 @@ No fim, o feedback do Aplicar acusa a falha do canal. Com a porta nova ocupada, 
     }
 ```
 
-- [ ] **Passo 5: Interface (`MainWindow.xaml`)**
+- [ ] **Passo 5: Interface (`MainWindow.xaml` e `MainWindow.xaml.cs`)**
 
 1. O Grid principal ganha uma linha: acrescentar mais um `<RowDefinition Height="Auto" />` às sete que existem.
 
@@ -5027,6 +5102,51 @@ No fim, o feedback do Aplicar acusa a falha do canal. Com a porta nova ocupada, 
                                Foreground="{StaticResource DimBrush}" Margin="0,3,0,12" />
 ```
 
+6. Com o card novo a janela fica alta demais para um notebook (1366x768 a 100%, 1080p a 125%): ela cresce com o conteúdo (`SizeToContent="Height"`) e não se redimensiona, e o fim — Diagnóstico, Configurações, **Aplicar** — ficaria fora da tela. O Grid principal passa a ficar dentro de um `ScrollViewer`. A abertura, logo depois da tag `<Window ...>`:
+
+```xml
+    <!-- Rola quando o conteúdo passa da altura máxima (a área útil da tela; ver MainWindow.xaml.cs). -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <Grid Margin="22,18,22,14">
+```
+
+e o fechamento, no fim do arquivo:
+
+```xml
+    </Grid>
+    </ScrollViewer>
+</Window>
+```
+
+7. Em `src/TwoG.Connector/MainWindow.xaml.cs`, o teto de altura é a área útil da tela, e a janela sobe quando cresce para trás da barra de tarefas (o `SizeToContent` cresce para baixo mantendo o `Top` da abertura centralizada: expandir Configurações levaria o Aplicar para baixo da barra). O construtor, depois de `InitializeComponent();`, e o método novo:
+
+```csharp
+        InitializeComponent();
+
+        // A janela cresce com o conteúdo (SizeToContent) e não se redimensiona: sem teto,
+        // passaria da tela num notebook (1366x768 a 100%, 1080p a 125%) e o fim — Diagnóstico,
+        // Configurações, Aplicar — ficaria inalcançável. Com ele, o ScrollViewer rola o resto.
+        MaxHeight = SystemParameters.WorkArea.Height;
+        SizeChanged += (_, _) => KeepBottomInWorkArea();
+    }
+
+    /// <summary>
+    /// O SizeToContent cresce a janela para baixo mantendo o Top (da abertura centralizada):
+    /// ao expandir Configurações/Diagnóstico o fim — com o Aplicar — iria para trás da barra
+    /// de tarefas. Sobe a janela o necessário. Só no monitor principal, o mesmo do MaxHeight.
+    /// </summary>
+    private void KeepBottomInWorkArea()
+    {
+        if (WindowState != WindowState.Normal || double.IsNaN(Top) || double.IsNaN(Left))
+            return;
+
+        var area = SystemParameters.WorkArea;
+        var onPrimary = Left < area.Right && Left + ActualWidth > area.Left && Top < area.Bottom;
+        if (onPrimary && Top + ActualHeight > area.Bottom)
+            Top = Math.Max(area.Top, area.Bottom - ActualHeight);
+    }
+```
+
 - [ ] **Passo 6: Compilar e conferir o layout**
 
 ```bash
@@ -5040,7 +5160,7 @@ Expected: build sem avisos; testes passando; os cards de topo em `Grid.Row` 1 a 
 - [ ] **Passo 7: Commit**
 
 ```bash
-git add src/TwoG.Connector/Services/ControlService.cs src/TwoG.Connector/Configuration/AppSettings.cs src/TwoG.Connector/Configuration/SettingsService.cs src/TwoG.Connector/App.xaml.cs src/TwoG.Connector/ViewModels/MainViewModel.cs src/TwoG.Connector/MainWindow.xaml
+git add src/TwoG.Connector/Services/ControlService.cs src/TwoG.Connector/Configuration/AppSettings.cs src/TwoG.Connector/Configuration/SettingsService.cs src/TwoG.Connector/App.xaml.cs src/TwoG.Connector/ViewModels/MainViewModel.cs src/TwoG.Connector/MainWindow.xaml src/TwoG.Connector/MainWindow.xaml.cs
 git commit -m "Card de controle pelo 2G Pilot: pareamento e aparelhos
 
 O canal sobe com o app quando \"Permitir controle pelo 2G Pilot\" está
@@ -5057,12 +5177,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ### Tarefa 11: Documentação e verificação em Windows
 
-Os passos 3 em diante dependem de uma máquina Windows com os simuladores e de um 2G Pilot com o lado do app implementado (o contrato no fim do 01). Nada aqui publica versão: PR, tag e release seguem o mesmo rito da v1.4.0 e exigem autorização explícita.
+Os passos 4 em diante dependem de uma máquina Windows com os simuladores e de um 2G Pilot com o lado do app implementado (o contrato no fim do 01). Nada aqui publica versão: PR, tag e release seguem o mesmo rito da v1.4.0 e exigem autorização explícita.
+
+Todo o texto dos passos 1 e 2 foi conferido contra o código final, depois das revisões das Tarefas 3 a 10: nomes de classe, portas, arquivos e comportamentos (a escolha do IP do `2GCTL`, o servidor fora da thread da interface, `sim_not_connected`/`unsupported`, o `state` na troca de fonte).
 
 **Arquivos:**
-- Modificar: `README.md`, `CLAUDE.md`, `docs/2g-connector-controles/02-radios-simconnect.md` (tabela de resultados)
+- Modificar: `README.md`, `CLAUDE.md`, `docs/2g-connector-controles/02-radios-simconnect.md` (tabela de resultados, no passo 5)
 
-- [ ] **Passo 1: README**
+- [x] **Passo 1: README**
 
 Seção nova, depois de "Sincronizar plano de voo":
 
@@ -5071,63 +5193,138 @@ Seção nova, depois de "Sincronizar plano de voo":
 
 O 2G Pilot pode sintonizar os rádios do simulador — COM1/COM2, NAV1/NAV2, ADF,
 transponder e altímetro — e mostra sempre o que está de fato no cockpit. Funciona
-com MSFS 2020, MSFS 2024 e Prepar3D.
+com MSFS 2020, MSFS 2024 e Prepar3D (este, experimental como o resto do suporte a
+ele, e sem o modo do transponder, que o Prepar3D não modela).
 
 **Parear um iPad, uma vez:**
 
 1. No 2G Connector, clique em **Parear aparelho**. Aparece um código de 6 dígitos,
-   válido por 2 minutos.
+   válido por 2 minutos, para um único pareamento; cinco tentativas erradas o anulam.
 2. No 2G Pilot, escolha o Connector na lista e digite o código.
 
 Depois disso o aparelho conecta sozinho. A lista de aparelhos pareados fica no card
-**Controle pelo 2G Pilot**, com o botão **Remover**. Para desligar o controle de vez:
-**Configurações → Permitir controle pelo 2G Pilot**.
+**Controle pelo 2G Pilot**, com o botão **Remover**, que derruba na hora a conexão do
+aparelho — para voltar, ele precisa parear de novo. Cabem 4 conexões ao mesmo tempo.
+Para desligar o controle de vez: **Configurações → Permitir controle pelo 2G Pilot**
+(a porta nem abre, e os pareamentos continuam guardados).
 
-Como funciona: o Connector anuncia o canal (`2GCTL`) na UDP 49002 e escuta em
-WebSocket na TCP 49004. O protocolo e o contrato para o app estão em
-[docs/2g-connector-controles](docs/2g-connector-controles/00-visao-geral.md).
+O que o app vê em cada situação:
+
+- **Sem simulador conectado**, o comando é recusado com `sim_not_connected`.
+- **Com o X-Plane**, o app vê o simulador, mas ainda sem rádios — eles chegam com o
+  [spec 03](docs/2g-connector-controles/03-radios-xplane.md). Até lá, os comandos
+  voltam `unsupported`.
+- **Troca de aeronave ou de simulador**: a lista de controles e o estado são
+  reenviados sozinhos ao app.
+
+Como funciona: a cada 5 s o Connector anuncia o canal na UDP 49002, pelos mesmos
+destinos do XGPS, com `2GCTL<nome>,1,ws://<ip>:49004/control`. O IP da URL é o da
+placa por onde aquele anúncio sai — o que a rota do Windows escolheria, com a
+sub-rede como reserva —, então um PC com Wi-Fi e cabo anuncia o endereço certo em
+cada rede. O canal é WebSocket na TCP 49004 (**Configurações → Porta do controle
+(TCP)**). O app manda só o ID do controle e um número inteiro (Hz, Pa, código do
+transponder); a tradução para o simulador é do Connector. O protocolo e o contrato
+para o app estão no [spec 01](docs/2g-connector-controles/01-canal-de-controle.md),
+com a visão geral em [docs/2g-connector-controles](docs/2g-connector-controles/00-visao-geral.md).
 
 Aeronaves de terceiros com rádios próprios (Fenix, PMDG e muitas do MSFS 2024) podem
 ignorar os comandos padrão: o 2G Pilot avisa quando o rádio não mudou. O suporte a
-elas vem com os perfis de aeronave (spec 04).
+elas vem com os perfis de aeronave
+([spec 04](docs/2g-connector-controles/04-perfis-e-modulo-msfs.md)).
 ```
 
-Na tabela de solução de problemas, duas linhas:
+Em "Como funciona", depois do item do SYNC PV:
+
+```markdown
+- **Controle pelo 2G Pilot**: o iPad pareado sintoniza os rádios do simulador e vê o
+  que está no cockpit. Ver [Controle pelo 2G Pilot](#controle-pelo-2g-pilot).
+```
+
+Em "Instalação", o item do firewall passa a citar a porta do controle:
+
+```markdown
+- Na primeira execução o Windows pode pedir permissão de firewall, porque o app
+  escuta o anúncio do X-Plane na rede, serve o plano de voo na porta 49003 e o
+  canal de controle na 49004. Permitir é necessário para **detectar o X-Plane**,
+  para o **SYNC PV** e para o **controle pelo 2G Pilot**; o envio de posição ao EFB
+  é de saída e funciona mesmo se você negar.
+```
+
+Na tabela "O que o app grava fora do .exe", depois de `settings.json`:
+
+```markdown
+| `%APPDATA%\2G Connector\paired-devices.json` | Aparelhos pareados para o controle pelo 2G Pilot — do token, só o hash SHA-256 |
+```
+
+Na tabela de solução de problemas, depois da linha da porta 49003:
 
 ```markdown
 | O 2G Pilot não encontra o Connector para controlar | Confira se "Permitir controle pelo 2G Pilot" está ligado e se o card mostra "Aguardando aparelho". Porta TCP 49004 bloqueada pelo firewall: libere o app para redes privadas |
-| O comando chega mas o rádio não muda | A aeronave ignora os eventos padrão do SimConnect (comum em aeronaves de terceiros) — ver spec 04 |
+| Card do controle mostra "Canal de controle indisponível" | Outro programa ocupa a porta TCP do controle (o motivo aparece no card e no Diagnóstico). Troque em **Configurações → Porta do controle (TCP)** e clique em **Aplicar** |
+| O comando chega mas o rádio não muda | A aeronave ignora os eventos padrão do SimConnect (comum em aeronaves de terceiros) — ver [spec 04](docs/2g-connector-controles/04-perfis-e-modulo-msfs.md) |
+| Com o X-Plane, o 2G Pilot não muda os rádios | Esperado: os rádios do X-Plane ainda não entram no canal e os comandos voltam `unsupported` ([spec 03](docs/2g-connector-controles/03-radios-xplane.md)) |
 ```
 
-- [ ] **Passo 2: CLAUDE.md**
-
-Em "Estrutura":
+Em "Desenvolvimento", a linha do Core:
 
 ```markdown
-- Canal de controle (specs em `docs/2g-connector-controles/`): Core com `ControlProtocol`,
-  `ControlSession`, `ControlServer` (WebSocket sobre TcpListener), `PairingCodes`,
-  `PairedDeviceStore`, `RadioCatalog`; no app, `SimConnectRadios` (ISimControl pelo
-  SimConnect) e `ControlService` (liga servidor, pareamento e anúncio 2GCTL)
+src/TwoG.Connector.Core/     Lógica pura (multiplataforma, testável): protocolo, EXE.xml,
+                             identidade do produto, manifesto/assinatura/política do updater,
+                             canal de controle (servidor WebSocket, pareamento, catálogo de rádios)
 ```
 
-Em "Regras importantes":
+- [x] **Passo 2: CLAUDE.md**
+
+Em "Estrutura", no fim da lista do app:
 
 ```markdown
-- **Canal de controle — invariante:** o app manda só ID do catálogo e inteiro. Nenhuma
-  mensagem carrega nome de variável, evento ou código; a tradução é do Connector.
+  - Canal de controle: `Services/SimConnectRadios.cs` (`ISimControl` pelo SimConnect),
+    `CompositeSimControl.cs` (repassa para a fonte ativa), `ControlAnnouncer.cs` (2GCTL a
+    cada 5 s) e `ControlService.cs` (liga servidor, pareamento e anúncio pelas Configurações)
+```
+
+e logo abaixo da linha do Core:
+
+```markdown
+  - Canal de controle (specs em `docs/2g-connector-controles/`): `ControlProtocol`, `ControlSession`,
+    `ControlServer` (WebSocket sobre TcpListener), `PairingCodes`, `PairedDeviceStore`,
+    `RadioCatalog`, `RadioConversions`, `ControlAnnouncement`; `ISimControl` em `ControlTypes`
+```
+
+Em "Regras importantes", depois do item do `FlightPlanServer`:
+
+```markdown
+- **Canal de controle — invariante:** o app manda só ID do catálogo (`RadioCatalog`) e
+  inteiro (Hz, Pa, código). Nenhuma mensagem carrega nome de SimVar, evento ou código; a
+  tradução é do Connector. Uma falha no canal nunca afeta o XGPS/XATT.
 - **SimConnect:** só a thread do `SimConnectService` toca o objeto `SimConnect`; comandos
-  chegam pela fila do `SimConnectRadios`. IDs de definição, requisição e evento dos rádios
-  começam em 100 — os da posição usam de 0 a 9 e não podem colidir.
+  entram pela fila do `SimConnectRadios` (`Submit` de qualquer thread, `CommandSignal` acorda
+  a thread, `Drain` executa). IDs de definição, requisição e evento dos rádios começam em 100
+  — os da posição usam de 0 a 9 e não podem colidir.
+- `ControlServer` mora no `Core` como o `FlightPlanServer` (TcpListener, upgrade feito à mão,
+  `WebSocket.CreateFromStream`; sem HttpListener) e é testado por `ClientWebSocket` real no
+  macOS contra `FakeSimControl`. NADA dele roda no contexto de quem chama (a thread da UI):
+  `Start` põe os laços no pool com `Task.Run`, `Stop` não bloqueia (manda o 1000 ANTES de
+  cancelar, e cancela quando os apps respondem ou em 2 s) e só o `Dispose`, na saída, espera
+  o 1000 por até 2 s. O laço de envio confere `SimulatorName` a cada tick: uma fonte sem
+  `ISimControl` (X-Plane) conecta e cai sem `Changed`, e o `state` tem de ir mesmo assim.
+- Erros de comando: sem fonte ativa → `sim_not_connected`; fonte ativa sem `Control`
+  (X-Plane, até o spec 03) → `unsupported`. A `ControlSession` checa o catálogo, depois o
+  simulador, depois os controles da aeronave — nessa ordem.
+- Anúncio `2GCTL` pelos destinos do XGPS (`SendToEach`, uma sentença por destino): o host da
+  URL é o IP que a rota do sistema escolhe (socket UDP conectado, sem enviar; `EnableBroadcast`
+  obrigatório, senão o broadcast dirigido dá WSAEACCES) e, se a sondagem falhar, o da
+  interface cuja sub-rede contém o destino (`NetworkMath.SourceAddressFor`).
 - Tokens de pareamento: em disco só o SHA-256 (`paired-devices.json`). Nunca logar token.
 ```
 
-- [ ] **Passo 3: Suíte completa, build e commit**
+- [x] **Passo 3: Suíte completa, build e commit**
 
 ```bash
 dotnet build TwoG.Connector.slnx
 dotnet test tests/TwoG.Connector.Core.Tests/TwoG.Connector.Core.Tests.csproj
 dotnet publish src/TwoG.Connector/TwoG.Connector.csproj -c Release -o /tmp/2gc-pub-ctl && ls /tmp/2gc-pub-ctl
-git add README.md CLAUDE.md
+git add README.md CLAUDE.md docs/2g-connector-controles/plano-implementacao-01-02.md
 git commit -m "Documenta o controle pelo 2G Pilot
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"

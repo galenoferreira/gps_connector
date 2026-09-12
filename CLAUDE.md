@@ -13,7 +13,13 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
   - `Services/SimConnectRuntime.cs` — extrai as DLLs do SimConnect (recursos embutidos)
     para `%LOCALAPPDATA%` e as carrega; chamar `Ensure()` ANTES de tocar tipos do SimConnect
   - `Services/UpdateService.cs` / `UpdateInstaller.cs` — auto-update (gatilhos, setup silencioso, troca do exe)
+  - Canal de controle: `Services/SimConnectRadios.cs` (`ISimControl` pelo SimConnect),
+    `CompositeSimControl.cs` (repassa para a fonte ativa), `ControlAnnouncer.cs` (2GCTL a
+    cada 5 s) e `ControlService.cs` (liga servidor, pareamento e anúncio pelas Configurações)
 - `src/TwoG.Connector.Core/` — lógica pura testável: identidade do produto, EXE.xml, manifesto/assinatura/política do updater, parsers
+  - Canal de controle (specs em `docs/2g-connector-controles/`): `ControlProtocol`, `ControlSession`,
+    `ControlServer` (WebSocket sobre TcpListener), `PairingCodes`, `PairedDeviceStore`,
+    `RadioCatalog`, `RadioConversions`, `ControlAnnouncement`; `ISimControl` em `ControlTypes`
 - `tools/TwoG.Connector.ReleaseSigner/` — gera e assina o `update.json` no CI
 - `installer/setup.iss` — instalador Inno Setup opcional (detecta MSFS, atalhos, desinstalador,
   limpeza da v1.3.0, `-register` ao terminar, reabertura após o setup silencioso do updater)
@@ -49,6 +55,28 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
   HttpListener NÃO serve aqui: escutar em todas as interfaces exigiria admin.
 - `FlightPlanServer` mora no `Core` de propósito — sem dependência de WPF, roda e é
   testado por HTTP real no macOS.
+- **Canal de controle — invariante:** o app manda só ID do catálogo (`RadioCatalog`) e
+  inteiro (Hz, Pa, código). Nenhuma mensagem carrega nome de SimVar, evento ou código; a
+  tradução é do Connector. Uma falha no canal nunca afeta o XGPS/XATT.
+- **SimConnect:** só a thread do `SimConnectService` toca o objeto `SimConnect`; comandos
+  entram pela fila do `SimConnectRadios` (`Submit` de qualquer thread, `CommandSignal` acorda
+  a thread, `Drain` executa). IDs de definição, requisição e evento dos rádios começam em 100
+  — os da posição usam de 0 a 9 e não podem colidir.
+- `ControlServer` mora no `Core` como o `FlightPlanServer` (TcpListener, upgrade feito à mão,
+  `WebSocket.CreateFromStream`; sem HttpListener) e é testado por `ClientWebSocket` real no
+  macOS contra `FakeSimControl`. NADA dele roda no contexto de quem chama (a thread da UI):
+  `Start` põe os laços no pool com `Task.Run`, `Stop` não bloqueia (manda o 1000 ANTES de
+  cancelar, e cancela quando os apps respondem ou em 2 s) e só o `Dispose`, na saída, espera
+  o 1000 por até 2 s. O laço de envio confere `SimulatorName` a cada tick: uma fonte sem
+  `ISimControl` (X-Plane) conecta e cai sem `Changed`, e o `state` tem de ir mesmo assim.
+- Erros de comando: sem fonte ativa → `sim_not_connected`; fonte ativa sem `Control`
+  (X-Plane, até o spec 03) → `unsupported`. A `ControlSession` checa o catálogo, depois o
+  simulador, depois os controles da aeronave — nessa ordem.
+- Anúncio `2GCTL` pelos destinos do XGPS (`SendToEach`, uma sentença por destino): o host da
+  URL é o IP que a rota do sistema escolhe (socket UDP conectado, sem enviar; `EnableBroadcast`
+  obrigatório, senão o broadcast dirigido dá WSAEACCES) e, se a sondagem falhar, o da
+  interface cuja sub-rede contém o destino (`NetworkMath.SourceAddressFor`).
+- Tokens de pareamento: em disco só o SHA-256 (`paired-devices.json`). Nunca logar token.
 - Simuladores novos entram implementando `ISimSource`; o broadcaster e a UI não mudam.
   Lógica pura (parsers, identificação) vai no `Core`, que é testável sem simulador.
 - **Entrega é UM único .exe** (`PublishSingleFile` no csproj, RID fixo `win-x64`).

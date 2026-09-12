@@ -90,6 +90,8 @@ X-Plane ──────────UDP RREF────┘
   apagar o registro, ele se refaz na execução seguinte.
 - **SYNC PV to 2G Pilot**: um clique lê o plano de voo ativo no simulador e o
   entrega ao EFB. Ver [Sincronizar plano de voo](#sincronizar-plano-de-voo).
+- **Controle pelo 2G Pilot**: o iPad pareado sintoniza os rádios do simulador e vê o
+  que está no cockpit. Ver [Controle pelo 2G Pilot](#controle-pelo-2g-pilot).
 - **Bandeja do sistema**: fechar a janela mantém a transmissão ativa em segundo
   plano; para encerrar de fato, use **Sair** no menu da bandeja.
 - **Atualização automática**: baixa versões novas em segundo plano, verificadas
@@ -173,6 +175,49 @@ O plano não cabe num datagrama UDP e UDP não garante entrega, então o conecto
 é omitido quando o plano não define altitude para o waypoint. Suba `schemaVersion`
 a cada mudança incompatível.
 
+## Controle pelo 2G Pilot
+
+O 2G Pilot pode sintonizar os rádios do simulador — COM1/COM2, NAV1/NAV2, ADF,
+transponder e altímetro — e mostra sempre o que está de fato no cockpit. Funciona
+com MSFS 2020, MSFS 2024 e Prepar3D (este, experimental como o resto do suporte a
+ele, e sem o modo do transponder, que o Prepar3D não modela).
+
+**Parear um iPad, uma vez:**
+
+1. No 2G Connector, clique em **Parear aparelho**. Aparece um código de 6 dígitos,
+   válido por 2 minutos, para um único pareamento; cinco tentativas erradas o anulam.
+2. No 2G Pilot, escolha o Connector na lista e digite o código.
+
+Depois disso o aparelho conecta sozinho. A lista de aparelhos pareados fica no card
+**Controle pelo 2G Pilot**, com o botão **Remover**, que derruba na hora a conexão do
+aparelho — para voltar, ele precisa parear de novo. Cabem 4 conexões ao mesmo tempo.
+Para desligar o controle de vez: **Configurações → Permitir controle pelo 2G Pilot**
+(a porta nem abre, e os pareamentos continuam guardados).
+
+O que o app vê em cada situação:
+
+- **Sem simulador conectado**, o comando é recusado com `sim_not_connected`.
+- **Com o X-Plane**, o app vê o simulador, mas ainda sem rádios — eles chegam com o
+  [spec 03](docs/2g-connector-controles/03-radios-xplane.md). Até lá, os comandos
+  voltam `unsupported`.
+- **Troca de aeronave ou de simulador**: a lista de controles e o estado são
+  reenviados sozinhos ao app.
+
+Como funciona: a cada 5 s o Connector anuncia o canal na UDP 49002, pelos mesmos
+destinos do XGPS, com `2GCTL<nome>,1,ws://<ip>:49004/control`. O IP da URL é o da
+placa por onde aquele anúncio sai — o que a rota do Windows escolheria, com a
+sub-rede como reserva —, então um PC com Wi-Fi e cabo anuncia o endereço certo em
+cada rede. O canal é WebSocket na TCP 49004 (**Configurações → Porta do controle
+(TCP)**). O app manda só o ID do controle e um número inteiro (Hz, Pa, código do
+transponder); a tradução para o simulador é do Connector. O protocolo e o contrato
+para o app estão no [spec 01](docs/2g-connector-controles/01-canal-de-controle.md),
+com a visão geral em [docs/2g-connector-controles](docs/2g-connector-controles/00-visao-geral.md).
+
+Aeronaves de terceiros com rádios próprios (Fenix, PMDG e muitas do MSFS 2024) podem
+ignorar os comandos padrão: o 2G Pilot avisa quando o rádio não mudou. O suporte a
+elas vem com os perfis de aeronave
+([spec 04](docs/2g-connector-controles/04-perfis-e-modulo-msfs.md)).
+
 ## Download
 
 Links **permanentes** — sempre entregam a versão mais recente, sem precisar de
@@ -194,9 +239,10 @@ dependências e sem instalador.
   dentro do executável.
 - Não requer administrador.
 - Na primeira execução o Windows pode pedir permissão de firewall, porque o app
-  escuta o anúncio do X-Plane na rede e serve o plano de voo na porta 49003.
-  Permitir é necessário para **detectar o X-Plane** e para o **SYNC PV**; o envio
-  de posição ao EFB é de saída e funciona mesmo se você negar.
+  escuta o anúncio do X-Plane na rede, serve o plano de voo na porta 49003 e o
+  canal de controle na 49004. Permitir é necessário para **detectar o X-Plane**,
+  para o **SYNC PV** e para o **controle pelo 2G Pilot**; o envio de posição ao EFB
+  é de saída e funciona mesmo se você negar.
 - Rode de onde quiser: Desktop, Downloads, pendrive.
 - Detecta o MSFS sozinho, em tempo de execução. Se você mover o `.exe` de lugar,
   o "Iniciar junto com o MSFS" se reajusta na próxima abertura.
@@ -207,6 +253,7 @@ dependências e sem instalador.
 | Caminho | Conteúdo |
 |---|---|
 | `%APPDATA%\2G Connector\settings.json` | Suas configurações (copiadas da pasta `2G GPS Cliente` na primeira execução, se existir) |
+| `%APPDATA%\2G Connector\paired-devices.json` | Aparelhos pareados para o controle pelo 2G Pilot — do token, só o hash SHA-256 |
 | `%LOCALAPPDATA%\2G Connector\runtime\<versão>\` | DLLs do SimConnect e do runtime C++, extraídas na 1ª execução |
 | `%LOCALAPPDATA%\2G Connector\updates\` | Atualização baixada e verificada, aguardando instalação |
 | `%LOCALAPPDATA%\2G Connector\erro.log` | Só se ocorrer um erro inesperado |
@@ -308,6 +355,10 @@ roteador. Ele mostra três coisas que respondem quase toda dúvida de rede:
 | X-Plane não é detectado | O beacon dele é bloqueado pelo firewall: libere o app para redes privadas, ou use o broadcast nativo do X-Plane (acima) |
 | SYNC PV não acha o plano | No MSFS/P3D, crie a rota antes de iniciar o voo; no X-Plane, salve-a em `Output/FMS plans` |
 | EFB não busca o plano anunciado | Porta TCP 49003 bloqueada pelo firewall — libere o app para redes privadas |
+| O 2G Pilot não encontra o Connector para controlar | Confira se "Permitir controle pelo 2G Pilot" está ligado e se o card mostra "Aguardando aparelho". Porta TCP 49004 bloqueada pelo firewall: libere o app para redes privadas |
+| Card do controle mostra "Canal de controle indisponível" | Outro programa ocupa a porta TCP do controle (o motivo aparece no card e no Diagnóstico). Troque em **Configurações → Porta do controle (TCP)** e clique em **Aplicar** |
+| O comando chega mas o rádio não muda | A aeronave ignora os eventos padrão do SimConnect (comum em aeronaves de terceiros) — ver [spec 04](docs/2g-connector-controles/04-perfis-e-modulo-msfs.md) |
+| Com o X-Plane, o 2G Pilot não muda os rádios | Esperado: os rádios do X-Plane ainda não entram no canal e os comandos voltam `unsupported` ([spec 03](docs/2g-connector-controles/03-radios-xplane.md)) |
 | "Falha ao inicializar o SimConnect" | Consulte `%LOCALAPPDATA%\2G Connector\erro.log` e [abra uma issue](https://github.com/galenoferreira/gps_connector/issues) com a mensagem |
 | Faixa "falhou 2 vezes — baixe manualmente" | A instalação automática dessa versão falhou nas duas tentativas e não será tentada de novo. Baixe pelo link da faixa |
 | Faixa "baixe manualmente (pasta do app sem permissão de escrita)" | O `.exe` está numa pasta onde o app não pode gravar. Mova-o para uma pasta sua (Desktop, Documentos) ou baixe pelo link da faixa |
@@ -318,7 +369,8 @@ roteador. Ele mostra três coisas que respondem quase toda dúvida de rede:
 ```
 src/TwoG.Connector/          App WPF (.NET 10, x64) — UI, SimConnect, broadcaster, updater
 src/TwoG.Connector.Core/     Lógica pura (multiplataforma, testável): protocolo, EXE.xml,
-                             identidade do produto, manifesto/assinatura/política do updater
+                             identidade do produto, manifesto/assinatura/política do updater,
+                             canal de controle (servidor WebSocket, pareamento, catálogo de rádios)
 tests/                       Testes de unidade do Core
 tools/                       ReleaseSigner: gera e assina o update.json no CI
 libs/                        DLLs do SimConnect (MSFS SDK) e do runtime VC++ x64
