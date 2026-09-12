@@ -29,6 +29,9 @@ public static class ProductIdentity
 
     public const string GitHubRepository = "galenoferreira/gps_connector";
 
+    /// <summary>Página do release mais recente: o caminho manual quando o auto-update não instala.</summary>
+    public const string LatestReleasePageUrl = "https://github.com/" + GitHubRepository + "/releases/latest";
+
     // ── Herdados da v1.3.0: NUNCA mudar ────────────────────────────────
     // São a forma de a v1.3.0 e as versões seguintes se enxergarem. Com os
     // mesmos nomes, se as duas forem lançadas (entrada antiga no EXE.xml, atalho

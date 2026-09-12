@@ -73,8 +73,17 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding UpdateBannerText}" FontSize="12" TextWrapping="Wrap"
-                               Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding UpdateBannerText}" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{StaticResource TextBrush}" />
+                        <!-- Faixas "baixe manualmente": o link para a página do release. -->
+                        <TextBlock FontSize="12" Margin="0,3,0,0"
+                                   Visibility="{Binding CanDownloadManually, Converter={StaticResource BoolToVisibility}}">
+                            <Hyperlink Command="{Binding OpenDownloadPageCommand}"
+                                       Foreground="{StaticResource AccentBrush}"
+                                       ToolTip="{Binding DownloadPageUrl}">Abrir a página de download</Hyperlink>
+                        </TextBlock>
+                    </StackPanel>
                     <Button Grid.Column="1" Content="Atualizar agora" Command="{Binding ApplyUpdateNowCommand}"
                             Visibility="{Binding CanApplyUpdateNow, Converter={StaticResource BoolToVisibility}}"
                             Margin="10,0,0,0" Padding="10,4" FontSize="11.5" />

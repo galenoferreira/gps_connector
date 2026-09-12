@@ -26,4 +26,12 @@ public class ProductIdentityTests
         Assert.Equal(ProductIdentity.DefaultDeviceName,
             XgpsSentences.SanitizeDeviceName(ProductIdentity.DefaultDeviceName));
     }
+
+    /// <summary>A faixa "baixe manualmente" aponta para cá: a página, não um arquivo.</summary>
+    [Fact]
+    public void LatestReleasePageIsTheRepositoryReleasesLatest()
+    {
+        Assert.Equal("https://github.com/galenoferreira/gps_connector/releases/latest",
+            ProductIdentity.LatestReleasePageUrl);
+    }
 }

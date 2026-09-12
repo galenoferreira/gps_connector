@@ -93,7 +93,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _updateBannerText = "";
     [ObservableProperty] private bool _hasUpdateBanner;
     [ObservableProperty] private bool _canApplyUpdateNow;
+    [ObservableProperty] private bool _canDownloadManually;
     [ObservableProperty] private string _diagUpdate = "—";
+
+    public string DownloadPageUrl => ProductIdentity.LatestReleasePageUrl;
 
     // ── Configurações (campos de edição) ────────────────────────────────
     [ObservableProperty] private string _deviceNameInput = "";
@@ -333,6 +336,7 @@ public partial class MainViewModel : ObservableObject
         {
             HasUpdateBanner = false;
             CanApplyUpdateNow = false;
+            CanDownloadManually = false;
             DiagUpdate = "desligado neste build (só builds de release se atualizam)";
             return;
         }
@@ -352,6 +356,7 @@ public partial class MainViewModel : ObservableObject
         {
             HasUpdateBanner = true;
             CanApplyUpdateNow = true;
+            CanDownloadManually = false;
             // Desligada, o TryApply recusa Startup e Exit: só o botão instala.
             UpdateBannerText = _settings.AutoUpdate
                 ? $"v{pending.Version} pronta — instala ao reiniciar"
@@ -361,18 +366,21 @@ public partial class MainViewModel : ObservableObject
         {
             HasUpdateBanner = true;
             CanApplyUpdateNow = false;
+            CanDownloadManually = true;
             UpdateBannerText = $"A instalação da v{exhausted.Version} falhou {exhausted.Attempts} vezes — baixe manualmente";
         }
         else if (updates.Kind == InstallKind.ReadOnly && latest is not null && latest > updates.CurrentVersion)
         {
             HasUpdateBanner = true;
             CanApplyUpdateNow = false;
+            CanDownloadManually = true;
             UpdateBannerText = $"v{latest} disponível — baixe manualmente (pasta do app sem permissão de escrita)";
         }
         else
         {
             HasUpdateBanner = false;
             CanApplyUpdateNow = false;
+            CanDownloadManually = false;
         }
 
         // Vale nos dois ramos: as tentativas podem ter acabado antes de o piloto desligar a
@@ -428,6 +436,26 @@ public partial class MainViewModel : ObservableObject
                 ProductIdentity.Name,
                 System.Windows.MessageBoxButton.OK,
                 System.Windows.MessageBoxImage.Warning);
+    }
+
+    /// <summary>O "com o link" do spec: abre a página do release no navegador padrão.</summary>
+    [RelayCommand]
+    private void OpenDownloadPage()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(ProductIdentity.LatestReleasePageUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // Sem navegador associado: o endereço fica à vista para o piloto digitar.
+            System.Windows.MessageBox.Show(
+                $"Não foi possível abrir o navegador. Baixe a versão nova em:\n\n{ProductIdentity.LatestReleasePageUrl}",
+                ProductIdentity.Name,
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
+        }
     }
 
     private static int NormalizeDeg(double deg)
@@ -569,11 +597,19 @@ public partial class MainViewModel : ObservableObject
         _settings.StartWithSim = StartWithSimInput;
         _settings.StartMinimized = StartMinimizedInput;
         _settings.CloseToTray = CloseToTrayInput;
+        var autoUpdateTurnedOn = AutoUpdateInput && !_settings.AutoUpdate;
         _settings.AutoUpdate = AutoUpdateInput;
 
         _settingsService.Save(_settings);
         _broadcaster.UpdateSettings(_settings);
         DeviceNameInput = device;
+
+        // O timer do UpdateService só volta a verificar em até 6 h, e a verificação
+        // dos 60 s não fez nada se a opção estava desligada: verifica já. No pool, como
+        // o timer: o UpdateChecker não usa ConfigureAwait(false) e o download inteiro
+        // voltaria para o thread da UI.
+        if (autoUpdateTurnedOn && _updates is { } updates)
+            _ = Task.Run(updates.CheckNowAsync);
 
         var extra = SyncAutoStart();
         ShowFeedback($"Configurações aplicadas ✓{extra}", isError: false);
