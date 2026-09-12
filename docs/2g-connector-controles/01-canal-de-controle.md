@@ -238,6 +238,10 @@ só oferece na tela o que está nesta lista.
 **`ok: true` significa "entregue ao simulador", não "aplicado".** A confirmação de que o
 cockpit mudou é o `state`.
 
+Exceção: nos controles que a aeronave só aceita girando o seletor (mecanismo `knob`, ver
+[04](04-perfis-e-modulo-msfs.md)), o `result` só chega depois da sequência de cliques, em
+até 3 s, e já diz se a aeronave seguiu o comando: `ok: true` ou `not_applied`.
+
 ### `state` (Connector → app)
 
 ```json
@@ -273,6 +277,9 @@ cockpit mudou é o `state`.
 
 Erros que não pertencem a um comando específico.
 
+O app deve tratar um código de erro desconhecido como falha genérica do comando, sem
+quebrar: é assim que etapas futuras acrescentam códigos sem mudar o protocolo.
+
 ### Códigos de erro
 
 | Código | Onde | Significado |
@@ -283,6 +290,7 @@ Erros que não pertencem a um comando específico.
 | `not_paired` | `result` | Comando antes de parear |
 | `rate_limited` | `result` | Mais de 20 comandos por segundo nesta conexão |
 | `sim_unresponsive` | `result` | Simulador conectado, mas com 32 comandos ainda pendentes na fila |
+| `not_applied` | `result` | A aeronave não seguiu o comando (sequência `knob` divergiu, estourou 60 cliques ou 3 s — ver 04) |
 | `invalid_message` | `error` | JSON inválido ou campo obrigatório ausente |
 | `protocol_unsupported` | `error` | `protocol` diferente de 1 |
 | `pairing_invalid` | `error` | Código errado ou expirado |
@@ -364,6 +372,11 @@ piloto iniciou.
   Nunca derruba o Connector.
 
 ## Segurança
+
+**O que o protocolo nunca transporta:** nome de variável, nome de evento ou código. O app
+manda só um ID do catálogo e um inteiro; a tradução para o que o simulador entende é do
+Connector (ver 02 e 04). É isso que impede um aparelho pareado de executar código dentro
+do simulador.
 
 **O que o pareamento garante:** sem o código mostrado na tela do Connector, nenhum
 aparelho da rede consegue comandar o simulador. Uma página web maliciosa aberta num
