@@ -87,6 +87,12 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
     private readonly Func<string?> _simulatorName;
     private readonly ConcurrentQueue<ControlCommand> _pending = new();
 
+    // Torna atômicos a checagem de _connected e o Enqueue do Submit contra o Reset. Sem ele,
+    // um Submit que passou da checagem antes do TearDown enfileiraria depois da limpeza, com
+    // o CommandSignal setado: o Drain logo depois do próximo TryConnect (antes até do
+    // OnRecvOpen) executaria um comando velho na conexão nova.
+    private readonly object _queueLock = new();
+
     // Thread do SimConnect.
     private readonly Dictionary<uint, RadioGroup> _packetToGroup = new();
     private readonly HashSet<RadioGroup> _failed = [];
@@ -116,12 +122,17 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
 
     public ControlResult Submit(ControlCommand command)
     {
-        if (!_connected)
-            return ControlResult.Fail(command.Id, ControlErrors.SimNotConnected);
-        if (_pending.Count >= MaxPending)
-            return ControlResult.Fail(command.Id, ControlErrors.SimUnresponsive);
+        lock (_queueLock)
+        {
+            if (!_connected)
+                return ControlResult.Fail(command.Id, ControlErrors.SimNotConnected);
+            if (_pending.Count >= MaxPending)
+                return ControlResult.Fail(command.Id, ControlErrors.SimUnresponsive);
 
-        _pending.Enqueue(command);
+            _pending.Enqueue(command);
+        }
+        // Fora do lock: se o Reset esvaziar a fila entre o Enqueue e o Set, o sinal fica
+        // setado com a fila vazia, e o Drain com fila vazia não faz nada.
         CommandSignal.Set();
         return ControlResult.Success(command.Id);
     }
@@ -133,6 +144,8 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
     /// <summary>Chamado no OnRecvOpen: mapeia eventos, define os grupos e pede os dados.</summary>
     public void Register(SimConnect sim)
     {
+        // Nada de uma sessão anterior sobrevive: a conexão nova começa com a fila vazia.
+        _pending.Clear();
         ClearRadios();
         _packetToGroup.Clear();
         _failed.Clear();
@@ -253,9 +266,10 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
     /// <summary>Conexão caiu (TearDown): nada de estado, nada de controles.</summary>
     public void Reset()
     {
-        _connected = false;
-        while (_pending.TryDequeue(out _))
+        lock (_queueLock)
         {
+            _connected = false;
+            _pending.Clear();
         }
         ClearRadios();
         _packetToGroup.Clear();

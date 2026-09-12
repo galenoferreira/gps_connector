@@ -21,7 +21,11 @@ internal sealed class CompositeSimControl : ISimControl
         }
     }
 
-    public string? SimulatorName => _active()?.Control?.SimulatorName;
+    /// <summary>
+    /// Nome da fonte ativa, tenha ela Control ou não: o X-Plane conectado aparece pelo nome,
+    /// com controls [] e radios {}. O null fica para "sem simulador conectado" (spec 01).
+    /// </summary>
+    public string? SimulatorName => _active()?.SimulatorName;
 
     public IReadOnlyCollection<string> AvailableControls => _active()?.Control?.AvailableControls ?? [];
 
@@ -29,8 +33,16 @@ internal sealed class CompositeSimControl : ISimControl
 
     public event Action? Changed;
 
+    /// <summary>
+    /// A sessão já barra como unsupported o que está fora de AvailableControls; aqui só chega
+    /// quem a fonte ativa trocou entre a checagem e o envio. Fonte ativa sem Control (X-Plane)
+    /// é unsupported, como a sessão diria; sim_not_connected só quando não há fonte ativa.
+    /// </summary>
     public ControlResult Submit(ControlCommand command) =>
-        _active()?.Control is { } control
-            ? control.Submit(command)
-            : ControlResult.Fail(command.Id, ControlErrors.SimNotConnected);
+        _active() switch
+        {
+            null => ControlResult.Fail(command.Id, ControlErrors.SimNotConnected),
+            { Control: { } control } => control.Submit(command),
+            _ => ControlResult.Fail(command.Id, ControlErrors.Unsupported),
+        };
 }
