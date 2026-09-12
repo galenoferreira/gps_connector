@@ -2851,7 +2851,9 @@ namespace TwoG.Connector.Services;
 /// segundo plano e instala só nos momentos que <see cref="UpdatePolicy"/> permite.
 /// Nenhuma falha daqui pode derrubar o app.
 /// </summary>
-internal sealed class UpdateService : IDisposable
+// Público como os demais serviços: o MainViewModel, público, o recebe no construtor
+// (internal daria CS0051).
+public sealed class UpdateService : IDisposable
 {
     private static readonly TimeSpan FirstCheckDelay = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(6);
@@ -3320,21 +3322,29 @@ Métodos novos:
 
         var pending = updates.Pending;
         var latest = updates.LatestSeen;
+        // Tentativas esgotadas: o TryApply não instala mais esta versão. Derivado da
+        // pendência gravada, não do LastError, que a próxima verificação zeraria. Vai
+        // para a faixa e, como o spec pede, para o Diagnóstico.
+        var exhausted = pending is not null && pending.IsFor(updates.Kind) && pending.AttemptsExhausted
+                        && !pending.IsStaleFor(updates.CurrentVersion)
+            ? pending
+            : null;
+
         // Mesma regra do TryApply: só oferece o que esta cópia vai de fato instalar.
         if (pending is not null && pending.CanBeInstalledBy(updates.Kind, updates.CurrentVersion))
         {
             HasUpdateBanner = true;
             CanApplyUpdateNow = true;
-            UpdateBannerText = $"v{pending.Version} pronta — instala ao reiniciar";
+            // Desligada, o TryApply recusa Startup e Exit: só o botão instala.
+            UpdateBannerText = _settings.AutoUpdate
+                ? $"v{pending.Version} pronta — instala ao reiniciar"
+                : $"v{pending.Version} pronta — atualização automática desligada; use Atualizar agora";
         }
-        else if (pending is not null && pending.IsFor(updates.Kind) && pending.AttemptsExhausted
-                 && !pending.IsStaleFor(updates.CurrentVersion))
+        else if (exhausted is not null)
         {
-            // Derivado do estado em disco, não do LastError: a próxima verificação
-            // zeraria a mensagem, e o spec pede que a falha continue visível.
             HasUpdateBanner = true;
             CanApplyUpdateNow = false;
-            UpdateBannerText = $"A instalação da v{pending.Version} falhou {pending.Attempts} vezes — baixe manualmente";
+            UpdateBannerText = $"A instalação da v{exhausted.Version} falhou {exhausted.Attempts} vezes — baixe manualmente";
         }
         else if (updates.Kind == InstallKind.ReadOnly && latest is not null && latest > updates.CurrentVersion)
         {
@@ -3348,9 +3358,15 @@ Métodos novos:
             CanApplyUpdateNow = false;
         }
 
+        // Vale nos dois ramos: as tentativas podem ter acabado antes de o piloto desligar a
+        // automática, ou pelo botão, que instala (e conta tentativa) mesmo com ela desligada.
+        var failed = exhausted is not null
+            ? $"  •  instalação da v{exhausted.Version} falhou {exhausted.Attempts} vezes"
+            : "";
+
         if (!_settings.AutoUpdate)
         {
-            DiagUpdate = $"v{updates.CurrentVersion}  •  atualização automática desligada";
+            DiagUpdate = $"v{updates.CurrentVersion}  •  atualização automática desligada{failed}";
             return;
         }
 
@@ -3358,7 +3374,7 @@ Métodos novos:
             ? $"verificado há {FormatElapsed(DateTime.UtcNow - at)}"
             : "ainda não verificado";
         var seen = latest is not null ? $"  •  mais recente: v{latest}" : "";
-        DiagUpdate = $"v{updates.CurrentVersion}  •  {check}{seen}";
+        DiagUpdate = $"v{updates.CurrentVersion}  •  {check}{seen}{failed}";
     }
 
     private static string FormatElapsed(TimeSpan span) =>
