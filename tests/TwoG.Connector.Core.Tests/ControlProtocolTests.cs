@@ -39,6 +39,20 @@ public class ControlProtocolTests
         Assert.Equal(64, hello.DeviceName.Length);
     }
 
+    [Theory]
+    [InlineData("""{"type":"hello","protocol":2}""", 2)]
+    [InlineData("""{"type":"hello","protocol":2,"device":"iPad"}""", 2)]
+    [InlineData("""{"type":"hello","protocol":0,"device":{"id":"a","name":"b"}}""", 0)]
+    [InlineData("""{"type":"hello","protocol":99999999999}""", 0)]
+    [InlineData("""{"type":"hello","protocol":1.5}""", 0)]
+    public void HelloWithOtherProtocolIsReadWithoutCheckingTheRest(string json, int expected)
+    {
+        // A sessão precisa ver a versão para responder protocol_unsupported e fechar com 4002.
+        var hello = Assert.IsType<HelloMessage>(Parse(json));
+        Assert.Equal(expected, hello.Protocol);
+        Assert.NotEqual(ControlProtocol.Version, hello.Protocol);
+    }
+
     [Fact]
     public void ReadsPair()
     {

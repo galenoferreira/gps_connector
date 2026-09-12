@@ -61,10 +61,16 @@ public static class ControlProtocol
 
     private static HelloMessage? ParseHello(JsonElement root)
     {
-        if (!root.TryGetProperty("protocol", out var protocolEl)
-            || protocolEl.ValueKind != JsonValueKind.Number
-            || !protocolEl.TryGetInt32(out var protocol))
+        if (!root.TryGetProperty("protocol", out var protocolEl) || protocolEl.ValueKind != JsonValueKind.Number)
             return null;
+
+        // Versão é a PRIMEIRA coisa a olhar: outra versão pode ter mudado o resto do hello, e
+        // o app precisa receber protocol_unsupported (4002), não invalid_message. Número que
+        // não cabe em Int32 (decimal, gigante) também não é versão que falamos: vira 0.
+        if (!protocolEl.TryGetInt32(out var protocol))
+            protocol = 0;
+        if (protocol != Version)
+            return new HelloMessage(protocol, "", "", null);
 
         if (!root.TryGetProperty("device", out var device) || device.ValueKind != JsonValueKind.Object
             || !TryString(device, "id", out var id) || id.Length == 0 || id.Length > MaxDeviceIdLength
