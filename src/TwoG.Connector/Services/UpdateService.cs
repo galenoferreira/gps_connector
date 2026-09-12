@@ -50,6 +50,11 @@ public sealed class UpdateService : IDisposable
         {
             PendingUpdateStore.Clear(updatesDir);
             Pending = null;
+            // Quem instalou (o setup, ou o exe novo no papel de substituto) roda de
+            // dentro desta pasta e ainda pode estar saindo: no Windows o binário dele
+            // não sai numa tentativa só, e ficaria ali até o próximo release.
+            if (Directory.Exists(updatesDir))
+                _ = Task.Run(() => ClearWhenReleasedAsync(updatesDir));
         }
     }
 
@@ -165,6 +170,20 @@ public sealed class UpdateService : IDisposable
     {
         _timer?.Dispose();
         _http.Dispose();
+    }
+
+    /// <summary>
+    /// Insiste em apagar a pasta de updates por até 20 s, uma vez por segundo. A
+    /// primeira verificação só acontece 60 s depois de abrir, então não há download
+    /// novo para atrapalhar.
+    /// </summary>
+    private static async Task ClearWhenReleasedAsync(string updatesDir)
+    {
+        for (var attempt = 0; attempt < 20 && Directory.Exists(updatesDir); attempt++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            PendingUpdateStore.Clear(updatesDir);
+        }
     }
 
     private static UpdateFeed ResolveFeed()
