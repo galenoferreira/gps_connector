@@ -236,7 +236,8 @@ A partir da v1.4.0 o 2G Connector se atualiza sozinho — e **nunca durante um v
   - **ao encerrar** pelo **Sair** da bandeja (ou fechando a janela com *Fechar
     para a bandeja* desmarcado) — instala e **não** reabre;
   - quando você clica em **Atualizar agora** — em voo, ele pergunta antes; a
-    versão nova reabre com a janela à vista.
+    versão nova reabre com a janela à vista, salvo com **Iniciar minimizado**
+    marcado (aí ela volta direto para a bandeja).
 
   Logoff e desligamento do Windows nunca instalam.
 - Todo download é verificado antes de instalar: o manifesto do release é assinado
