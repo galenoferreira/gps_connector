@@ -180,6 +180,14 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
         if (data.dwData is not { Length: > 0 })
             return false;
 
+        // Grupo que falhou: o pedido do Register segue ativo e o pacote chega sem o campo
+        // recusado (o resto da struct é lixo). É nosso, mas não entra no estado.
+        foreach (var (group, _, request) in Groups)
+        {
+            if ((uint)request == data.dwRequestID && _failed.Contains(group))
+                return true;
+        }
+
         switch ((Request)data.dwRequestID)
         {
             case Request.Com1 when data.dwData[0] is FrequencyPairData d:
@@ -224,8 +232,7 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
             return false;
         _failed.Add(group);
         _available.Remove(group);
-        if (group == RadioGroup.TransponderMode)
-            _xpdrMode = null;
+        ClearGroup(group);   // um valor que já tinha chegado também sai do estado
         Publish();
         return true;
     }
@@ -330,6 +337,21 @@ internal sealed class SimConnectRadios : ISimControl, IDisposable
         else
             _available.Remove(group);
         return available;
+    }
+
+    private void ClearGroup(RadioGroup group)
+    {
+        switch (group)
+        {
+            case RadioGroup.Com1: _com1 = null; break;
+            case RadioGroup.Com2: _com2 = null; break;
+            case RadioGroup.Nav1: _nav1 = null; break;
+            case RadioGroup.Nav2: _nav2 = null; break;
+            case RadioGroup.Adf1: _adf1 = null; break;
+            case RadioGroup.Transponder: _xpdrCode = null; break;
+            case RadioGroup.TransponderMode: _xpdrMode = null; break;
+            case RadioGroup.Altimeter: _baroPa = null; break;
+        }
     }
 
     private void ClearRadios()
