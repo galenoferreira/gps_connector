@@ -23,10 +23,12 @@ public static class RadioConversions
     }
 
     /// <summary>
-    /// Hz em BCD32 para o ADF_COMPLETE_SET: 350.000 Hz → 0x00350000. É a leitura atual
-    /// do formato; a confirmação em simulador é o item V4 do spec 02.
+    /// Hz em BCD32 para o ADF_COMPLETE_SET (unidade Frequency ADF BCD32): quatro dígitos
+    /// de kHz, o décimo e três nibbles zero, ou seja, BCD de Hz × 10.
+    /// 350.000 Hz → 0x03500000; 1.234,5 kHz → 0x12345000. A confirmação em simulador
+    /// é o item V4 do spec 02.
     /// </summary>
-    public static uint HzToBcd32(long hz) => DecimalToBcd(hz, digits: 8);
+    public static uint HzToBcd32(long hz) => DecimalToBcd(hz * 10, digits: 8);
 
     /// <summary>Pa para milibares × 16 (KOHLSMAN_SET): 101.325 → 16.212.</summary>
     public static uint PaToMillibars16(long pa) =>

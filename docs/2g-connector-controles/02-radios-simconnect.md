@@ -79,7 +79,7 @@ enviados com `TransmitClientEvent` ao objeto do usuário
 | `nav2.active` | `NAV2_RADIO_SET_HZ` | Hz |
 | `nav2.standby` | `NAV2_STBY_SET_HZ` | Hz |
 | `nav2.swap` | `NAV2_RADIO_SWAP` | — |
-| `adf1.active` | `ADF_COMPLETE_SET` | BCD (ver V4) |
+| `adf1.active` | `ADF_COMPLETE_SET` | BCD32 do ADF: `350000` Hz → `0x03500000` (ver V4) |
 | `xpdr.code` | `XPNDR_SET` | BCD16: `7700` → `0x7700` |
 | `xpdr.mode` | escrita na SimVar `TRANSPONDER STATE:1` (`SetDataOnSimObject`) | enumeração |
 | `altimeter.baro` | `KOHLSMAN_SET` | milibares × 16: `101325` Pa → `16212` |
@@ -88,6 +88,10 @@ Conversões, todas no Core e testadas:
 
 - **Hz → parâmetro:** direto; o maior valor (136.990.000) cabe no `uint` do evento.
 - **Código → BCD16:** cada dígito decimal vira um nibble: `7700` → `0x7700`, `1200` → `0x1200`.
+- **Hz → BCD32 do ADF:** unidade Frequency ADF BCD32 do FSX/P3D/MSFS: quatro dígitos de
+  kHz, o décimo e três nibbles zero, ou seja, BCD de Hz × 10: `350000` → `0x03500000`,
+  `1799500` → `0x17995000` (1.234,5 kHz é `0x12345000`, exemplo de Pete Dowson no
+  FSDeveloper). A leitura volta em Hz por `ADF ACTIVE FREQUENCY:1`, sem BCD.
 - **Pa → milibares × 16:** `round(Pa × 16 / 100)`.
 
 ### Estado
@@ -153,7 +157,7 @@ Cada item é conferido pelo `state` que chega ao app, não pela tela do simulado
 | V1 | `COM_STBY_RADIO_SET_HZ` com `118500000` no **P3D** | `state` mostra 118500000 | Plano B do Prepar3D, acima |
 | V2 | Canal de 8,33 (`118005000`) no MSFS 2020 e 2024, rádio em modo 8,33 | `state` mostra 118005000 | Se o `state` vier em frequência real (118000000), converter canal ↔ frequência no Core e documentar no 01 |
 | V3 | Mesmo canal com o rádio em modo 25 kHz | Simulador arredonda; `state` mostra o valor arredondado; app exibe o que veio | Nenhuma ação: comportamento esperado |
-| V4 | `ADF_COMPLETE_SET` com 350 kHz e 1.799,5 kHz no MSFS 2024 e no P3D | `state` mostra 350000 e 1799500 | Testar o formato BCD alternativo; no MSFS, alternativa de escrever `ADF ACTIVE FREQUENCY:1` |
+| V4 | `ADF_COMPLETE_SET` com 350 kHz e 1.799,5 kHz no MSFS 2024 e no P3D | Enviando `0x03500000` e `0x17995000` (BCD de Hz × 10), `state` mostra 350000 e 1799500 | Testar o formato BCD alternativo (BCD direto dos dígitos de Hz, `0x00350000`); no MSFS, alternativa de escrever `ADF ACTIVE FREQUENCY:1` |
 | V5 | `KOHLSMAN_SET` com `16212` no MSFS 2024 | Altímetro 1 em 1013 hPa; `state` com ≈101325 | Se ajustar outro altímetro ou nenhum, usar `TransmitClientEvent_EX1` com o índice do altímetro |
 | V6 | Mudar COM1 com o simulador pausado | `state` chega na pausa | Se não chegar, pedir o estado também com período `SECOND` |
 | V7 | Escrever `TRANSPONDER STATE:1` = 4 no MSFS 2020 e 2024 | `state` com `mode: 4` | Procurar o evento equivalente no SDK; se não houver, `xpdr.mode` sai da primeira entrega |

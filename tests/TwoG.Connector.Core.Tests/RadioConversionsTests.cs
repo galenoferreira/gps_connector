@@ -25,10 +25,11 @@ public class RadioConversionsTests
     }
 
     [Theory]
-    [InlineData(350_000L, 0x00350000u)]
-    [InlineData(1_799_500L, 0x01799500u)]
-    [InlineData(190_000L, 0x00190000u)]
-    public void HzToBcd32EncodesTheHertzDigits(long hz, uint bcd)
+    [InlineData(350_000L, 0x03500000u)]
+    [InlineData(1_799_500L, 0x17995000u)]
+    [InlineData(190_000L, 0x01900000u)]
+    [InlineData(1_234_500L, 0x12345000u)]
+    public void HzToBcd32UsesTheAdfBcd32Layout(long hz, uint bcd)
     {
         Assert.Equal(bcd, RadioConversions.HzToBcd32(hz));
     }
