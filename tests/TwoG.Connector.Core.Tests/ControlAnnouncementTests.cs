@@ -50,15 +50,45 @@ public class ControlAnnouncementTests
         Assert.StartsWith("2GCTLMeu PC 1,1,", ControlAnnouncement.Sentence("Meu PC,1","ws://h:1/control"));
     }
 
+    [Theory]
+    [InlineData("10.0.0.255", "10.0.0.7")]    // broadcast da LAN /24
+    [InlineData("10.0.0.50", "10.0.0.7")]     // EFB descoberto na LAN
+    [InlineData("10.200.0.1", "10.8.0.2")]    // só a VPN /8 contém
+    public void OverlappingSubnetsPickTheLongestMaskWhateverTheOrder(string destination, string expected)
+    {
+        (IPAddress, IPAddress) vpn = (IPAddress.Parse("10.8.0.2"), IPAddress.Parse("255.0.0.0"));
+        (IPAddress, IPAddress) lan = (IPAddress.Parse("10.0.0.7"), IPAddress.Parse("255.255.255.0"));
+
+        Assert.Equal(IPAddress.Parse(expected), NetworkMath.SourceAddressFor(IPAddress.Parse(destination), [vpn, lan]));
+        Assert.Equal(IPAddress.Parse(expected), NetworkMath.SourceAddressFor(IPAddress.Parse(destination), [lan, vpn]));
+    }
+
     [Fact]
-    public void SentenceForUsesTheInterfaceOfTheDestination()
+    public void TheRouteDecidesBetweenTwoCardsOnTheSameSubnet()
+    {
+        // Wi-Fi enumerada antes da Ethernet, as duas na mesma /24: o broadcast sai pela de
+        // menor métrica, e só a rota do sistema sabe qual é.
+        (IPAddress, IPAddress)[] wifiThenEthernet =
+        [
+            (IPAddress.Parse("192.168.1.20"), IPAddress.Parse("255.255.255.0")),
+            (IPAddress.Parse("192.168.1.10"), IPAddress.Parse("255.255.255.0")),
+        ];
+
+        var sentence = ControlAnnouncement.SentenceFor(IPAddress.Parse("192.168.1.255"), "X", 49004, wifiThenEthernet,
+            _ => IPAddress.Parse("192.168.1.10"));
+
+        Assert.Equal("2GCTLX,1,ws://192.168.1.10:49004/control", sentence);
+    }
+
+    [Fact]
+    public void WithoutRouteTheSubnetOfTheDestinationDecides()
     {
         var sentence = ControlAnnouncement.SentenceFor(IPAddress.Parse("10.255.255.255"), "2G Connector", 49004, WifiAndEthernet, NoRoute);
         Assert.Equal("2GCTL2G Connector,1,ws://10.0.0.5:49004/control", sentence);
     }
 
     [Fact]
-    public void SentenceForFallsBackToTheRoute()
+    public void SentenceForUsesTheRouteOutsideEverySubnet()
     {
         var sentence = ControlAnnouncement.SentenceFor(IPAddress.Parse("172.16.0.9"), "X", 49004, WifiAndEthernet,
             _ => IPAddress.Parse("172.16.0.1"));

@@ -68,14 +68,23 @@ internal sealed class ControlAnnouncer : IDisposable
         return list;
     }
 
-    /// <summary>IP de saída que o Windows escolheria para o destino. Não envia nada.</summary>
+    /// <summary>
+    /// IP de saída que o Windows escolheria para o destino (prefixo mais longo, depois a
+    /// menor métrica) — o mesmo do envio real, que sai de um socket sem bind. Não envia
+    /// nada. <c>EnableBroadcast</c> é obrigatório: sem ele o Connect a um broadcast dirigido
+    /// falha (WSAEACCES) e todo anúncio de broadcast cairia na reserva por sub-rede.
+    /// </summary>
     private static IPAddress? RouteSource(IPAddress destination)
     {
         try
         {
-            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+            {
+                EnableBroadcast = true,
+            };
             probe.Connect(destination, 9);
-            return (probe.LocalEndPoint as IPEndPoint)?.Address;
+            var source = (probe.LocalEndPoint as IPEndPoint)?.Address;
+            return source is null || source.Equals(IPAddress.Any) ? null : source;
         }
         catch (SocketException)
         {

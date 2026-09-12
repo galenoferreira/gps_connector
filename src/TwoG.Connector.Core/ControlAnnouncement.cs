@@ -17,13 +17,18 @@ public static class ControlAnnouncement
     public static string Sentence(string deviceName, string url) =>
         $"{Prefix}{XgpsSentences.SanitizeDeviceName(deviceName)},{ControlProtocol.Version},{url}";
 
-    /// <summary>Sentença para um destino, ou null se não houver por onde ele saia.</summary>
+    /// <summary>
+    /// Sentença para um destino, ou null se não houver por onde ele saia. Quem responde
+    /// primeiro é a rota do sistema (<paramref name="routeSource"/>): ela é quem escolhe a
+    /// placa de fato, inclusive entre duas na mesma sub-rede, pela métrica. O casamento por
+    /// sub-rede é a reserva, para quando a sondagem da rota falha.
+    /// </summary>
     public static string? SentenceFor(
         IPAddress destination, string deviceName, int port,
         IReadOnlyList<(IPAddress Address, IPAddress Mask)> interfaces,
         Func<IPAddress, IPAddress?> routeSource)
     {
-        var host = NetworkMath.SourceAddressFor(destination, interfaces) ?? routeSource(destination);
+        var host = routeSource(destination) ?? NetworkMath.SourceAddressFor(destination, interfaces);
         return host is null ? null : Sentence(deviceName, Url(host, port));
     }
 }

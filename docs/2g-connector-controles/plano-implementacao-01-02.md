@@ -3494,15 +3494,45 @@ public class ControlAnnouncementTests
         Assert.StartsWith("2GCTLMeu PC 1,1,", ControlAnnouncement.Sentence("Meu PC, 1", "ws://h:1/control"));
     }
 
+    [Theory]
+    [InlineData("10.0.0.255", "10.0.0.7")]    // broadcast da LAN /24
+    [InlineData("10.0.0.50", "10.0.0.7")]     // EFB descoberto na LAN
+    [InlineData("10.200.0.1", "10.8.0.2")]    // só a VPN /8 contém
+    public void OverlappingSubnetsPickTheLongestMaskWhateverTheOrder(string destination, string expected)
+    {
+        (IPAddress, IPAddress) vpn = (IPAddress.Parse("10.8.0.2"), IPAddress.Parse("255.0.0.0"));
+        (IPAddress, IPAddress) lan = (IPAddress.Parse("10.0.0.7"), IPAddress.Parse("255.255.255.0"));
+
+        Assert.Equal(IPAddress.Parse(expected), NetworkMath.SourceAddressFor(IPAddress.Parse(destination), [vpn, lan]));
+        Assert.Equal(IPAddress.Parse(expected), NetworkMath.SourceAddressFor(IPAddress.Parse(destination), [lan, vpn]));
+    }
+
     [Fact]
-    public void SentenceForUsesTheInterfaceOfTheDestination()
+    public void TheRouteDecidesBetweenTwoCardsOnTheSameSubnet()
+    {
+        // Wi-Fi enumerada antes da Ethernet, as duas na mesma /24: o broadcast sai pela de
+        // menor métrica, e só a rota do sistema sabe qual é.
+        (IPAddress, IPAddress)[] wifiThenEthernet =
+        [
+            (IPAddress.Parse("192.168.1.20"), IPAddress.Parse("255.255.255.0")),
+            (IPAddress.Parse("192.168.1.10"), IPAddress.Parse("255.255.255.0")),
+        ];
+
+        var sentence = ControlAnnouncement.SentenceFor(IPAddress.Parse("192.168.1.255"), "X", 49004, wifiThenEthernet,
+            _ => IPAddress.Parse("192.168.1.10"));
+
+        Assert.Equal("2GCTLX,1,ws://192.168.1.10:49004/control", sentence);
+    }
+
+    [Fact]
+    public void WithoutRouteTheSubnetOfTheDestinationDecides()
     {
         var sentence = ControlAnnouncement.SentenceFor(IPAddress.Parse("10.255.255.255"), "2G Connector", 49004, WifiAndEthernet, NoRoute);
         Assert.Equal("2GCTL2G Connector,1,ws://10.0.0.5:49004/control", sentence);
     }
 
     [Fact]
-    public void SentenceForFallsBackToTheRoute()
+    public void SentenceForUsesTheRouteOutsideEverySubnet()
     {
         var sentence = ControlAnnouncement.SentenceFor(IPAddress.Parse("172.16.0.9"), "X", 49004, WifiAndEthernet,
             _ => IPAddress.Parse("172.16.0.1"));
@@ -3528,9 +3558,12 @@ Em `src/TwoG.Connector.Core/NetworkMath.cs`, dentro da classe, depois de `Direct
 
 ```csharp
     /// <summary>
-    /// IP da interface por onde <paramref name="destination"/> sai: a primeira cuja sub-rede
-    /// contém o destino (o broadcast dirigido pertence à própria sub-rede). Null quando
-    /// nenhuma contém — quem chama decide pela rota do sistema.
+    /// IP da interface cuja sub-rede contém <paramref name="destination"/> (o broadcast
+    /// dirigido pertence à própria sub-rede). Entre várias que contêm, vence a de máscara
+    /// mais longa, como na tabela de rotas: numa VPN 10.0.0.0/8 ao lado da LAN 10.0.0.0/24,
+    /// 10.0.0.50 sai pela LAN, qualquer que seja a ordem das interfaces. Empate de máscara
+    /// (duas placas na mesma sub-rede) quem desfaz é a métrica, que só a rota do sistema
+    /// conhece — por isso isto é a reserva dela, não o contrário. Null quando nenhuma contém.
     /// </summary>
     public static IPAddress? SourceAddressFor(
         IPAddress destination, IEnumerable<(IPAddress Address, IPAddress Mask)> interfaces)
@@ -3539,6 +3572,8 @@ Em `src/TwoG.Connector.Core/NetworkMath.cs`, dentro da classe, depois de `Direct
             return null;
 
         var dest = destination.GetAddressBytes();
+        IPAddress? best = null;
+        var bestPrefix = -1;
         foreach (var (address, mask) in interfaces)
         {
             if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork
@@ -3559,10 +3594,19 @@ Em `src/TwoG.Connector.Core/NetworkMath.cs`, dentro da classe, depois de `Direct
                     break;
                 }
             }
-            if (sameNetwork)
-                return address;
+            if (!sameNetwork)
+                continue;
+
+            var prefix = 0;
+            foreach (var b in m)
+                prefix += System.Numerics.BitOperations.PopCount(b);
+            if (prefix > bestPrefix)
+            {
+                best = address;
+                bestPrefix = prefix;
+            }
         }
-        return null;
+        return best;
     }
 ```
 
@@ -3588,13 +3632,18 @@ public static class ControlAnnouncement
     public static string Sentence(string deviceName, string url) =>
         $"{Prefix}{XgpsSentences.SanitizeDeviceName(deviceName)},{ControlProtocol.Version},{url}";
 
-    /// <summary>Sentença para um destino, ou null se não houver por onde ele saia.</summary>
+    /// <summary>
+    /// Sentença para um destino, ou null se não houver por onde ele saia. Quem responde
+    /// primeiro é a rota do sistema (<paramref name="routeSource"/>): ela é quem escolhe a
+    /// placa de fato, inclusive entre duas na mesma sub-rede, pela métrica. O casamento por
+    /// sub-rede é a reserva, para quando a sondagem da rota falha.
+    /// </summary>
     public static string? SentenceFor(
         IPAddress destination, string deviceName, int port,
         IReadOnlyList<(IPAddress Address, IPAddress Mask)> interfaces,
         Func<IPAddress, IPAddress?> routeSource)
     {
-        var host = NetworkMath.SourceAddressFor(destination, interfaces) ?? routeSource(destination);
+        var host = routeSource(destination) ?? NetworkMath.SourceAddressFor(destination, interfaces);
         return host is null ? null : Sentence(deviceName, Url(host, port));
     }
 }
@@ -3735,14 +3784,23 @@ internal sealed class ControlAnnouncer : IDisposable
         return list;
     }
 
-    /// <summary>IP de saída que o Windows escolheria para o destino. Não envia nada.</summary>
+    /// <summary>
+    /// IP de saída que o Windows escolheria para o destino (prefixo mais longo, depois a
+    /// menor métrica) — o mesmo do envio real, que sai de um socket sem bind. Não envia
+    /// nada. <c>EnableBroadcast</c> é obrigatório: sem ele o Connect a um broadcast dirigido
+    /// falha (WSAEACCES) e todo anúncio de broadcast cairia na reserva por sub-rede.
+    /// </summary>
     private static IPAddress? RouteSource(IPAddress destination)
     {
         try
         {
-            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+            {
+                EnableBroadcast = true,
+            };
             probe.Connect(destination, 9);
-            return (probe.LocalEndPoint as IPEndPoint)?.Address;
+            var source = (probe.LocalEndPoint as IPEndPoint)?.Address;
+            return source is null || source.Equals(IPAddress.Any) ? null : source;
         }
         catch (SocketException)
         {
@@ -3767,9 +3825,11 @@ Expected: build sem avisos, testes passando. O anunciador só entra em funcionam
 git add src/TwoG.Connector.Core/ControlAnnouncement.cs src/TwoG.Connector.Core/NetworkMath.cs tests/TwoG.Connector.Core.Tests/ControlAnnouncementTests.cs src/TwoG.Connector/Services/IXgpsBroadcaster.cs src/TwoG.Connector/Services/XgpsBroadcaster.cs src/TwoG.Connector/Services/ControlAnnouncer.cs
 git commit -m "Anúncio 2GCTL com o IP da interface de cada destino
 
-O host da URL é o IP da interface cuja sub-rede contém o destino, com a
-rota do sistema como reserva: num PC com Wi-Fi e Ethernet, cada interface
-anuncia o próprio endereço. O broadcaster ganha o envio de uma sentença
+O host da URL é o IP de origem que a rota do sistema escolhe para o
+destino, com a interface de máscara mais longa que o contém como reserva:
+num PC com Wi-Fi e Ethernet, cada interface anuncia o próprio endereço, e
+duas placas na mesma sub-rede anunciam a que o Windows usa de fato
+(métrica). O broadcaster ganha o envio de uma sentença
 por destino, e o envio a todos passa a ser o caso particular dele.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
