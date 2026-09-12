@@ -306,17 +306,26 @@ lançado com `-minimized` pelo MSFS volta minimizado. No gatilho de saída o app
 `/norelaunch`, e a entrada `[Run]` é condicionada à ausência desse parâmetro.
 
 **Exe avulso.** O Windows permite renomear um exe em execução, só não sobrescrevê-lo.
-O app:
+Mas quem troca o arquivo é o exe **novo**, não o app que está saindo: no single-file o
+runtime abre o bundle pelo caminho a cada assembly carregado pela primeira vez, e um
+processo que continua rodando depois da troca leria o exe novo com os offsets do antigo.
 
-1. renomeia o próprio exe para `2G-Connector.exe.old`;
-2. move o novo para o nome original;
-3. executa o novo com os argumentos originais mais `--updated` — exceto no gatilho
-   de saída, em que não executa nada;
-4. encerra.
+1. o app executa o exe novo direto da pasta de updates, com
+   `--replace <exe> <pid> <1|0> <argumentos originais>` (0 no gatilho de saída), e
+   encerra;
+2. o exe novo espera esse processo terminar e pega o mutex;
+3. renomeia o exe antigo para `2G-Connector.exe.old` e copia a si mesmo para o nome
+   original (se falhar, o antigo volta para o lugar);
+4. executa o exe do nome original com os argumentos originais mais `--updated` —
+   exceto no gatilho de saída — solta o mutex e sai.
 
-O exe novo, ao receber `--updated`, **espera** o mutex ser liberado (até 10 s) em vez
-de sair como segunda instância, e apaga o `.old` ao subir. O caminho do exe não muda,
-então o `EXE.xml` continua certo.
+O exe reaberto, ao receber `--updated`, **espera** o mutex ser liberado (até 10 s) em
+vez de sair como segunda instância, e apaga o `.old` ao subir. O caminho do exe não
+muda, então o `EXE.xml` continua certo. O formato de `--replace` é contrato entre
+versões: nunca muda.
+
+No botão "Atualizar agora" a janela está à vista, então o `-minimized` não é repassado
+em nenhum dos dois tipos de instalação: a versão nova volta à vista.
 
 **Pasta sem permissão de escrita.** Não tenta. Mostra "atualização disponível —
 baixe manualmente", com o link.

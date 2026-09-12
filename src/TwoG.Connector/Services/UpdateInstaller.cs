@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using TwoG.Connector.Core;
 
@@ -12,11 +13,20 @@ internal static class UpdateInstaller
 {
     /// <summary>
     /// Passado ao exe novo no modo avulso: espere o mutex em vez de sair como
-    /// segunda instância — a versão anterior está terminando de sair.
+    /// segunda instância — quem fez a troca está terminando de sair.
     /// </summary>
     public const string UpdatedArg = "--updated";
 
+    /// <summary>
+    /// Pedido de troca do exe avulso. A versão anterior roda o exe NOVO direto da pasta
+    /// de updates com <c>--replace &lt;exe&gt; &lt;pid da anterior&gt; &lt;1|0&gt; [argumentos para reabrir...]</c>
+    /// (1 = reabrir depois). É contrato entre versões: nunca mudar o formato.
+    /// </summary>
+    public const string ReplaceArg = "--replace";
+
     private const string OldSuffix = ".old";
+    private static readonly TimeSpan PreviousExitTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MutexTimeout = TimeSpan.FromSeconds(10);
 
     public static void Launch(PendingUpdate pending, InstallKind kind, string exePath,
                               IReadOnlyList<string> relaunchArgs, bool relaunch, Action releaseMutex)
@@ -27,7 +37,7 @@ internal static class UpdateInstaller
                 LaunchInstaller(pending.FilePath, relaunchArgs, relaunch, releaseMutex);
                 break;
             case InstallKind.Portable:
-                SwapExecutable(pending.FilePath, exePath, relaunchArgs, relaunch, releaseMutex);
+                LaunchReplacer(pending.FilePath, exePath, relaunchArgs, relaunch, releaseMutex);
                 break;
             default:
                 throw new IOException("pasta do executável sem permissão de escrita");
@@ -62,35 +72,120 @@ internal static class UpdateInstaller
     }
 
     /// <summary>
-    /// Exe avulso: o Windows deixa renomear um exe em execução, só não sobrescrever.
-    /// O caminho não muda, então o EXE.xml continua certo.
+    /// Exe avulso: quem troca o arquivo é o exe NOVO, rodando da pasta de updates, depois
+    /// que este processo tiver saído de vez. Trocar daqui não é seguro: no single-file o
+    /// runtime abre o bundle PELO CAMINHO a cada assembly carregado pela primeira vez, e
+    /// depois da troca leria o exe novo com os offsets do antigo — BadImageFormatException
+    /// em qualquer ponto do encerramento, com o mutex ainda preso.
     /// </summary>
-    private static void SwapExecutable(string newExePath, string exePath, IReadOnlyList<string> relaunchArgs,
+    private static void LaunchReplacer(string newExePath, string exePath, IReadOnlyList<string> relaunchArgs,
                                        bool relaunch, Action releaseMutex)
+    {
+        var start = new ProcessStartInfo(newExePath) { UseShellExecute = false };
+        start.ArgumentList.Add(ReplaceArg);
+        start.ArgumentList.Add(exePath);
+        start.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+        start.ArgumentList.Add(relaunch ? "1" : "0");
+        foreach (var arg in relaunchArgs)
+            start.ArgumentList.Add(arg);
+
+        Process.Start(start);
+        releaseMutex();
+    }
+
+    /// <summary>Se este processo foi lançado para trocar o exe avulso (ver <see cref="ReplaceArg"/>).</summary>
+    public static bool IsReplaceRequest(IReadOnlyList<string> args) =>
+        args.Count >= 4 && string.Equals(args[0], ReplaceArg, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Lado do exe novo no pedido de troca: espera a versão anterior terminar, troca o
+    /// arquivo e reabre pelo caminho de sempre (o EXE.xml continua certo). Processo sem
+    /// janela: nunca lança nem mostra nada. Se algo falhar, o exe anterior fica (ou
+    /// volta) no lugar e a próxima abertura tenta de novo, dentro do limite de tentativas.
+    /// </summary>
+    public static void RunReplace(IReadOnlyList<string> args, Func<TimeSpan, bool> acquireMutex, Action releaseMutex)
+    {
+        try
+        {
+            var exePath = args[1];
+            var relaunch = args[3] == "1";
+            var newExePath = Environment.ProcessPath;
+            if (newExePath is null
+                || !int.TryParse(args[2], NumberStyles.None, CultureInfo.InvariantCulture, out var pid))
+                return;
+
+            // O mutex a anterior solta antes de terminar; o arquivo dela só fica fora de
+            // uso quando o processo acaba.
+            if (!WaitForExit(pid, PreviousExitTimeout))
+                return;
+            // Com o mutex ninguém abre o conector no meio da troca. Se outra instância
+            // subiu nesse intervalo, ela fica como está.
+            if (!acquireMutex(MutexTimeout))
+                return;
+
+            try
+            {
+                Swap(newExePath, exePath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // O exe anterior continua no lugar: reabre ele mesmo.
+            }
+
+            if (relaunch)
+            {
+                var start = new ProcessStartInfo(exePath)
+                {
+                    UseShellExecute = false,
+                    // Não herdar a pasta de updates como diretório atual: presa, ela não
+                    // seria apagada quando a pendência for limpa.
+                    WorkingDirectory = Path.GetDirectoryName(exePath) ?? "",
+                };
+                foreach (var arg in args.Skip(4))
+                    start.ArgumentList.Add(arg);
+                start.ArgumentList.Add(UpdatedArg);
+                Process.Start(start);
+            }
+        }
+        catch (Exception)
+        {
+            // Melhor esforço, sem janela para avisar.
+        }
+        finally
+        {
+            releaseMutex();
+        }
+    }
+
+    /// <summary>O Windows deixa renomear um exe, só não sobrescrever enquanto roda.</summary>
+    private static void Swap(string newExePath, string exePath)
     {
         var oldPath = exePath + OldSuffix;
         TryDelete(oldPath);                     // resto de uma troca anterior
         File.Move(exePath, oldPath);
         try
         {
-            // Cópia, não move: a pasta de updates pode estar em outro volume.
+            // Cópia, não move: o exe novo é este processo, rodando da pasta de updates.
             File.Copy(newExePath, exePath, overwrite: false);
         }
         catch
         {
-            File.Move(oldPath, exePath);        // desfaz: o app continua como estava
+            File.Move(oldPath, exePath);        // desfaz: fica a versão anterior
             throw;
         }
+    }
 
-        if (relaunch)
+    private static bool WaitForExit(int pid, TimeSpan timeout)
+    {
+        try
         {
-            var start = new ProcessStartInfo(exePath) { UseShellExecute = false };
-            foreach (var arg in relaunchArgs)
-                start.ArgumentList.Add(arg);
-            start.ArgumentList.Add(UpdatedArg);
-            Process.Start(start);
+            using var process = Process.GetProcessById(pid);
+            return process.WaitForExit(timeout);
         }
-        releaseMutex();
+        catch (ArgumentException)
+        {
+            return true;                        // já tinha saído
+        }
     }
 
     /// <summary>Apaga o .old deixado pela troca do exe avulso. Melhor esforço.</summary>

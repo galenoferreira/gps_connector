@@ -59,6 +59,14 @@ public partial class App : Application
         // pode matar o processo no meio de uma instalação. Nunca instala aqui.
         SessionEnding += (_, _) => _sessionEnding = true;
 
+        // Lançado da pasta de updates pela versão anterior: troca o exe avulso e sai.
+        if (UpdateInstaller.IsReplaceRequest(e.Args))
+        {
+            UpdateInstaller.RunReplace(e.Args, AcquireSingleInstance, ReleaseSingleInstance);
+            Shutdown();
+            return;
+        }
+
         // Chamado pelo desinstalador: remove nossas entradas dos EXE.xml e sai.
         if (e.Args.Any(a => string.Equals(a, "-unregister", StringComparison.OrdinalIgnoreCase)))
         {
@@ -75,9 +83,7 @@ public partial class App : Application
             return;
         }
 
-        var startMinimizedArg = e.Args.Any(a =>
-            string.Equals(a, "-minimized", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+        var startMinimizedArg = e.Args.Any(IsMinimizedArg);
 
         var updatedArg = e.Args.Any(a =>
             string.Equals(a, UpdateInstaller.UpdatedArg, StringComparison.OrdinalIgnoreCase));
@@ -246,6 +252,17 @@ public partial class App : Application
         }
     }
 
+    /// <summary>Pega o mutex de instância única, esperando até <paramref name="timeout"/>.</summary>
+    private bool AcquireSingleInstance(TimeSpan timeout)
+    {
+        _singleInstanceMutex = new Mutex(true, MutexName, out var owned);
+        return owned || WaitForMutex(_singleInstanceMutex, timeout);
+    }
+
+    private static bool IsMinimizedArg(string arg) =>
+        string.Equals(arg, "-minimized", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(arg, "--minimized", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Argumentos para reabrir o app depois de atualizar, sem o marcador do updater.</summary>
     private static string[] RelaunchArgs(IEnumerable<string> args) =>
         args.Where(a => !string.Equals(a, UpdateInstaller.UpdatedArg, StringComparison.OrdinalIgnoreCase))
@@ -274,7 +291,9 @@ public partial class App : Application
     {
         if (_updates is null)
             return false;
-        var args = RelaunchArgs(Environment.GetCommandLineArgs().Skip(1));
+        // O botão foi clicado com a janela à vista: a versão nova volta à vista, mesmo
+        // que esta tenha sido aberta com -minimized pelo MSFS ou pela chave Run.
+        var args = RelaunchArgs(Environment.GetCommandLineArgs().Skip(1).Where(a => !IsMinimizedArg(a)));
         if (!_updates.TryApply(UpdateTrigger.Manual, inFlight, args, relaunch: true,
                                ReleaseSingleInstance, confirmInFlight))
             return false;
