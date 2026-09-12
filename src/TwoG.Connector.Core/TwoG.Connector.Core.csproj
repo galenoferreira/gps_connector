@@ -8,4 +8,10 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
+  <!-- Chaves públicas aceitas para assinar atualizações (ver UpdateKeys.cs). -->
+  <ItemGroup>
+    <EmbeddedResource Include="UpdateKeys\*.pubkey"
+                      LogicalName="TwoG.Connector.Core.UpdateKeys.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
