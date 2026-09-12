@@ -14,6 +14,8 @@
         Background="{StaticResource BgBrush}"
         FontFamily="Segoe UI">
 
+    <!-- Rola quando o conteúdo passa da altura máxima (a área útil da tela; ver MainWindow.xaml.cs). -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
     <Grid Margin="22,18,22,14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -335,4 +337,5 @@
         <TextBlock Grid.Row="7" Text="{Binding VersionText, Mode=OneTime}" FontSize="10.5"
                    Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Center" />
     </Grid>
+    </ScrollViewer>
 </Window>

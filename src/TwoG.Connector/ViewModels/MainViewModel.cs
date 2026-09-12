@@ -310,8 +310,11 @@ public partial class MainViewModel : ObservableObject
         // Um erro de envio é a única prova local de que o pacote nem saiu da máquina.
         var sendError = _broadcaster.LastSendError;
         var discoveryError = _discovery?.LastError;
+        // O Stop do servidor não limpa o LastError: com o controle desligado nas Configurações,
+        // um erro de porta antigo acusaria um canal que o próprio piloto desligou.
+        var controlError = _settings.AllowControl ? _control?.Server.LastError : null;
         DiagLastError = string.Join("  •  ",
-            new[] { sendError, discoveryError, _updates?.LastError, _control?.Server.LastError }.Where(e => e is { Length: > 0 }));
+            new[] { sendError, discoveryError, _updates?.LastError, controlError }.Where(e => e is { Length: > 0 }));
         HasDiagError = DiagLastError.Length > 0;
 
         UpdateDiscovery();

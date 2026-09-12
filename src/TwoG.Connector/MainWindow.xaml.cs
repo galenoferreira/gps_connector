@@ -16,6 +16,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // A janela cresce com o conteúdo (SizeToContent) e não se redimensiona: sem teto,
+        // passaria da tela num notebook (1366x768 a 100%, 1080p a 125%) e o fim — Diagnóstico,
+        // Configurações, Aplicar — ficaria inalcançável. Com ele, o ScrollViewer rola o resto.
+        MaxHeight = SystemParameters.WorkArea.Height;
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
