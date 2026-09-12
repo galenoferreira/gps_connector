@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TwoG.Connector.Core/TwoG.Connector.Core.csproj" />
+    <Project Path="src/TwoG.Connector/TwoG.Connector.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TwoG.Connector.Core.Tests/TwoG.Connector.Core.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/TwoG.Connector.ReleaseSigner/TwoG.Connector.ReleaseSigner.csproj" />
+  </Folder>
+</Solution>

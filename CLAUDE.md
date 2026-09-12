@@ -1,4 +1,4 @@
-# 2G GPS Cliente for MSFS
+# 2G Connector
 
 Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimConnect
 (MSFS 2020/2024 e Prepar3D v4+) e transmite no protocolo XGPS (UDP broadcast, porta
@@ -6,13 +6,17 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
 
 ## Estrutura
 
-- `src/TwoG.GpsClient/` — app WPF (namespace `TwoG.GpsClient`, exe `2G-GPS-Cliente.exe`)
+- `src/TwoG.Connector/` — app WPF (namespace `TwoG.Connector`, exe `2G-Connector.exe`)
   - `Services/SimConnectService.cs` — conexão/retry SimConnect, normaliza unidades para `GpsFix`
   - `Services/XgpsBroadcaster.cs` — sentenças XGPS/XATT via UDP (broadcast + unicast opcional)
   - `ViewModels/MainViewModel.cs` — UI orientada por polling (DispatcherTimer 250 ms)
   - `Services/SimConnectRuntime.cs` — extrai as DLLs do SimConnect (recursos embutidos)
     para `%LOCALAPPDATA%` e as carrega; chamar `Ensure()` ANTES de tocar tipos do SimConnect
-- `installer/setup.iss` — instalador Inno Setup opcional (detecta MSFS, atalhos, desinstalador)
+  - `Services/UpdateService.cs` / `UpdateInstaller.cs` — auto-update (gatilhos, setup silencioso, troca do exe)
+- `src/TwoG.Connector.Core/` — lógica pura testável: identidade do produto, EXE.xml, manifesto/assinatura/política do updater, parsers
+- `tools/TwoG.Connector.ReleaseSigner/` — gera e assina o `update.json` no CI
+- `installer/setup.iss` — instalador Inno Setup opcional (detecta MSFS, atalhos, desinstalador,
+  limpeza da v1.3.0, `-register` ao terminar, reabertura após o setup silencioso do updater)
 - `.github/workflows/build.yml` — build + instalador no windows-latest
 
 ## Regras importantes
@@ -56,3 +60,17 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
 - Neste volume (exFAT) o macOS cria arquivos `._*` que quebram o build; o
   `Directory.Build.targets` os remove dos globs, mas passe sempre o caminho do
   `.csproj` explicitamente nos comandos `dotnet` (a busca por pasta ainda os enxerga).
+- **Nomes herdados da v1.3.0 que NUNCA mudam:** mutex `Local\TwoG.GpsClient.SingleInstance`,
+  evento `Local\TwoG.GpsClient.ShowWindow` (em `ProductIdentity`, com teste que os fixa) e o
+  `AppId` do instalador (em `setup.iss`, que também usa o mutex no `AppMutex`). Mudar faz a
+  v1.3.0 e a atual transmitirem em dobro, e o instalador instalar ao lado em vez de atualizar.
+- **Updater:** só instala nos gatilhos Startup, Exit e Manual (`UpdatePolicy`), nunca por
+  timer. Só builds de tag (`UpdateChannel=stable`) se atualizam. Toda atualização passa por
+  assinatura ECDSA P-256 → versão maior → SHA256, nessa ordem.
+- **Troca do exe avulso:** quem troca o arquivo é o exe NOVO, rodando da pasta de updates com
+  `--replace <exe> <pid> <1|0> [argumentos...]` (`UpdateInstaller.ReplaceArg`). O formato é
+  contrato entre versões: a versão instalada chama a NOVA com ele; nunca mudar.
+- **Chave de assinatura:** a privada vive só no secret `UPDATE_SIGNING_KEY` e com o
+  mantenedor (arquivo local + backup). Nunca ler, copiar ou imprimir. Testes geram pares
+  descartáveis. Rotação = publicar antes uma versão cuja pasta `UpdateKeys/` tenha a chave
+  antiga e a nova.

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon256.png" width="96" alt="2G GPS Cliente" />
+  <img src="assets/icon256.png" width="96" alt="2G Connector" />
 </p>
 
-<h1 align="center">2G GPS Cliente for MSFS</h1>
+<h1 align="center">2G Connector</h1>
 
 <p align="center">
   Conector Windows que transmite a posição do <b>Microsoft Flight Simulator 2020/2024</b>
@@ -26,8 +26,8 @@
 
 Voando, o EFB passa a usar a posição do simulador no lugar do GPS do aparelho.
 No ForeFlight, a barra de instrumentos mostra a precisão identificada pelo nome do
-dispositivo (ex.: *Accuracy (2G GPS)*), e a atitude enviada alimenta o horizonte
-do Synthetic Vision.
+dispositivo (ex.: *Accuracy (2G Connector)*), e a atitude enviada alimenta o
+horizonte do Synthetic Vision.
 
 > Outros EFBs que leem o protocolo XGPS na porta 49002 tendem a funcionar, mas
 > não são testados nem oficialmente suportados.
@@ -58,12 +58,12 @@ O X-Plane já sabe transmitir XGPS/XATT sozinho: *Settings → Network → "iPho
 iPad and External Apps"*, marcando o broadcast para apps de mapa. Funciona sem
 este conector.
 
-O que você ganha usando o 2G GPS Cliente: o dispositivo aparece com o nome
-**"2G GPS"** no EFB em vez de **"1"** (o X-Plane se anuncia como `XGPS1`), não
-precisa achar a opção nos ajustes, e você pode enviar para um IP específico em
-outra sub-rede. O que você perde: o caminho nativo tem precisão um pouco melhor
-(~1,5 m contra o float32 do protocolo de datarefs), diferença irrelevante para um
-mapa móvel.
+O que você ganha usando o 2G Connector: o dispositivo aparece no EFB com o nome
+que você escolher (padrão **"2G Connector"**) em vez de **"1"** (o X-Plane se
+anuncia como `XGPS1`), não precisa achar a opção nos ajustes, e você pode enviar
+para um IP específico em outra sub-rede. O que você perde: o caminho nativo tem
+precisão um pouco melhor (~1,5 m contra o float32 do protocolo de datarefs),
+diferença irrelevante para um mapa móvel.
 
 </details>
 
@@ -71,7 +71,7 @@ mapa móvel.
 
 ```
 MSFS · Prepar3D ──SimConnect──┐
-                              ├─▶ 2G GPS Cliente ──UDP 49002 (XGPS/XATT)──▶ EFB
+                              ├─▶ 2G Connector ──UDP 49002 (XGPS/XATT)──▶ EFB
 X-Plane ──────────UDP RREF────┘
 ```
 
@@ -92,6 +92,8 @@ X-Plane ──────────UDP RREF────┘
   entrega ao EFB. Ver [Sincronizar plano de voo](#sincronizar-plano-de-voo).
 - **Bandeja do sistema**: fechar a janela mantém a transmissão ativa em segundo
   plano; para encerrar de fato, use **Sair** no menu da bandeja.
+- **Atualização automática**: baixa versões novas em segundo plano, verificadas
+  por assinatura digital, e só instala fora de voo. Ver [Atualização automática](#atualização-automática).
 
 ## Descoberta automática do EFB
 
@@ -178,9 +180,9 @@ atualização a cada release:
 
 | Link | Para quem |
 |---|---|
-| [**2G-GPS-Cliente.exe**](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente.exe) | **Recomendado** — executável único, sem instalação |
-| [2G-GPS-Cliente.zip](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente.zip) | Mesmo executável, compactado |
-| [2G-GPS-Cliente-Setup.exe](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-GPS-Cliente-Setup.exe) | Instalador com atalho no Menu Iniciar e desinstalador |
+| [**2G-Connector.exe**](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-Connector.exe) | **Recomendado** — executável único, sem instalação |
+| [2G-Connector.zip](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-Connector.zip) | Mesmo executável, compactado |
+| [2G-Connector-Setup.exe](https://github.com/galenoferreira/gps_connector/releases/latest/download/2G-Connector-Setup.exe) | Instalador com atalho no Menu Iniciar e desinstalador |
 | [Página de releases](https://github.com/galenoferreira/gps_connector/releases/latest) | Notas da versão e checksums SHA-256 |
 
 ## Instalação
@@ -204,9 +206,10 @@ dependências e sem instalador.
 
 | Caminho | Conteúdo |
 |---|---|
-| `%APPDATA%\2G GPS Cliente\settings.json` | Suas configurações |
-| `%LOCALAPPDATA%\2G GPS Cliente\runtime\<versão>\` | DLLs do SimConnect e do runtime C++, extraídas na 1ª execução |
-| `%LOCALAPPDATA%\2G GPS Cliente\erro.log` | Só se ocorrer um erro inesperado |
+| `%APPDATA%\2G Connector\settings.json` | Suas configurações (copiadas da pasta `2G GPS Cliente` na primeira execução, se existir) |
+| `%LOCALAPPDATA%\2G Connector\runtime\<versão>\` | DLLs do SimConnect e do runtime C++, extraídas na 1ª execução |
+| `%LOCALAPPDATA%\2G Connector\updates\` | Atualização baixada e verificada, aguardando instalação |
+| `%LOCALAPPDATA%\2G Connector\erro.log` | Só se ocorrer um erro inesperado |
 | `EXE.xml` do MSFS | Só se "Iniciar junto com o MSFS" estiver marcado |
 
 A primeira execução é um pouco mais lenta, porque o executável se descompacta;
@@ -217,6 +220,67 @@ as seguintes são normais.
 > **Aviso SmartScreen**: builds sem assinatura digital exibem *"O Windows protegeu
 > seu computador"* — clique em **Mais informações → Executar assim mesmo**. É o
 > comportamento padrão do Windows para executáveis novos não assinados.
+
+## Atualização automática
+
+A partir da v1.4.0 o 2G Connector se atualiza sozinho — e **nunca durante um voo**.
+
+- Verifica um minuto depois de abrir e a cada 6 horas, e baixa em segundo plano.
+  Religar **Atualizar automaticamente** e clicar em **Aplicar** também verifica
+  na hora.
+- Com a versão nova baixada, aparece uma faixa abaixo do cabeçalho
+  (*"v1.4.1 pronta — instala ao reiniciar"*) com o botão **Atualizar agora**.
+- Instala só em três momentos:
+  - **ao abrir**, antes de conectar ao simulador — e reabre do mesmo jeito que
+    foi aberto (minimizado, se foi o MSFS que o lançou);
+  - **ao encerrar** pelo **Sair** da bandeja (ou fechando a janela com *Fechar
+    para a bandeja* desmarcado) — instala e **não** reabre;
+  - quando você clica em **Atualizar agora** — em voo, ele pergunta antes; a
+    versão nova reabre com a janela à vista, salvo com **Iniciar minimizado**
+    marcado (aí ela volta direto para a bandeja).
+
+  Logoff e desligamento do Windows nunca instalam.
+- Todo download é verificado antes de instalar: o manifesto do release é assinado
+  digitalmente, a versão precisa ser mais nova que a instalada e o arquivo precisa
+  bater com o tamanho e o hash SHA-256 declarados. Qualquer falha descarta o
+  download e aparece no painel **Diagnóstico**, que também mostra a última
+  verificação e a versão mais recente vista.
+- Cada versão tem no máximo **duas tentativas** de instalação. Se as duas falharem,
+  ela deixa de ser tentada: a faixa passa a dizer *"baixe manualmente"*, com o link
+  **Abrir a página de download** (página do release mais recente), e o
+  Diagnóstico registra a falha.
+- Quem instalou pelo `2G-Connector-Setup.exe` é atualizado pelo instalador novo, em
+  modo silencioso e sem pedir administrador. No `.exe` avulso, a versão nova
+  substitui o arquivo no mesmo lugar (o antigo fica como `2G-Connector.exe.old`
+  até a próxima abertura, que o apaga), então o "Iniciar junto com o MSFS"
+  continua apontando para o lugar certo.
+- Se o `.exe` estiver numa pasta onde o app não pode gravar, ele não baixa nada:
+  a faixa avisa que há versão nova e mostra o mesmo link para baixar manualmente.
+- Para desligar: **Configurações → Atualizar automaticamente**. Desligado, o app
+  não verifica, não baixa e não instala sozinho; uma versão que já estava baixada
+  ainda pode ser instalada pelo botão **Atualizar agora**.
+
+### Vindo da v1.3.0 (2G GPS Cliente)
+
+Quem está na v1.3.0 ou anterior atualiza manualmente uma última vez, baixando o
+arquivo novo do mesmo tipo que já usa. A configuração e o registro no MSFS são
+migrados sozinhos:
+
+- as configurações são copiadas da pasta `2G GPS Cliente` na primeira execução. A
+  pasta antiga fica intacta, então voltar à v1.3.0 continua funcionando. O nome de
+  dispositivo não muda: quem atualiza continua aparecendo no EFB como antes
+  (*2G GPS*, se nunca trocou); o padrão *2G Connector* vale só para instalação nova;
+- no `EXE.xml` do MSFS, a entrada `2G GPS Cliente` dá lugar à `2G Connector`;
+- o instalador atualiza a instalação existente, na mesma pasta, e apaga o
+  `2G-GPS-Cliente.exe`, os atalhos antigos e o valor `2G GPS Cliente` do "iniciar
+  com o Windows". Se você tinha desabilitado o conector na aba *Aplicativos de
+  inicialização* do Gerenciador de Tarefas e mantiver a opção de iniciar com o
+  Windows, ele continua desabilitado lá. Ao terminar, o instalador já registra o
+  exe novo no `EXE.xml` (se "Iniciar junto com o MSFS" estiver ligado), sem
+  precisar abrir o app.
+
+Abrir o exe antigo por engano não duplica a transmissão: as duas versões dividem a
+mesma trava de instância única, e só uma sobe.
 
 ## Solução de problemas
 
@@ -244,42 +308,63 @@ roteador. Ele mostra três coisas que respondem quase toda dúvida de rede:
 | X-Plane não é detectado | O beacon dele é bloqueado pelo firewall: libere o app para redes privadas, ou use o broadcast nativo do X-Plane (acima) |
 | SYNC PV não acha o plano | No MSFS/P3D, crie a rota antes de iniciar o voo; no X-Plane, salve-a em `Output/FMS plans` |
 | EFB não busca o plano anunciado | Porta TCP 49003 bloqueada pelo firewall — libere o app para redes privadas |
-| "Falha ao inicializar o SimConnect" | Consulte `%LOCALAPPDATA%\2G GPS Cliente\erro.log` e [abra uma issue](https://github.com/galenoferreira/gps_connector/issues) com a mensagem |
+| "Falha ao inicializar o SimConnect" | Consulte `%LOCALAPPDATA%\2G Connector\erro.log` e [abra uma issue](https://github.com/galenoferreira/gps_connector/issues) com a mensagem |
+| Faixa "falhou 2 vezes — baixe manualmente" | A instalação automática dessa versão falhou nas duas tentativas e não será tentada de novo. Baixe pelo link da faixa |
+| Faixa "baixe manualmente (pasta do app sem permissão de escrita)" | O `.exe` está numa pasta onde o app não pode gravar. Mova-o para uma pasta sua (Desktop, Documentos) ou baixe pelo link da faixa |
+| Atualização não chega | No Diagnóstico, a linha **Atualização** mostra a última verificação e a versão mais recente vista; o último erro (sem acesso ao feed, assinatura inválida, hash que não confere) aparece em vermelho no fim do painel |
 
 ## Desenvolvimento
 
 ```
-src/TwoG.GpsClient/        App WPF (.NET 10, x64) — UI, SimConnect, broadcaster
-src/TwoG.GpsClient.Core/   Lógica pura do protocolo (multiplataforma, testável)
-tests/                     Testes de unidade do protocolo
-libs/                      DLLs do SimConnect (MSFS SDK) e do runtime VC++ x64
-installer/setup.iss        Instalador Inno Setup (opcional)
+src/TwoG.Connector/          App WPF (.NET 10, x64) — UI, SimConnect, broadcaster, updater
+src/TwoG.Connector.Core/     Lógica pura (multiplataforma, testável): protocolo, EXE.xml,
+                             identidade do produto, manifesto/assinatura/política do updater
+tests/                       Testes de unidade do Core
+tools/                       ReleaseSigner: gera e assina o update.json no CI
+libs/                        DLLs do SimConnect (MSFS SDK) e do runtime VC++ x64
+installer/setup.iss          Instalador Inno Setup (opcional)
 ```
 
 ```bash
-dotnet test tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj
+dotnet test tests/TwoG.Connector.Core.Tests/TwoG.Connector.Core.Tests.csproj
 ```
 
 ```bash
-dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj -c Release -o publish
+dotnet publish src/TwoG.Connector/TwoG.Connector.csproj -c Release -o publish
 ```
 
 Ambos rodam em qualquer sistema operacional — o csproj traz `EnableWindowsTargeting`
 e RID fixo `win-x64`, então o publish gera o `.exe` até a partir de macOS/Linux.
 O binário, porém, só **executa** no Windows: o SimConnect é x64/Windows.
 
-### Publicar uma nova versão
+### Publicar uma versão
 
 ```bash
-git tag v1.1.0 && git push origin v1.1.0
+git tag v1.4.1 && git push origin v1.4.1
 ```
 
-Só isso. O CI roda os testes, publica o executável único, **valida que a saída tem
-exatamente 1 arquivo**, compila o instalador, gera os checksums e cria o Release
-com notas automáticas. A versão da tag vira a versão do binário.
+Um push de tag `v*` gera o release. O CI roda os testes, publica o executável único,
+**valida que a saída tem exatamente 1 arquivo**, compila o instalador, assina o
+manifesto do updater, gera os checksums e cria o Release com notas automáticas. A
+versão da tag vira a versão do binário, e só builds de tag levam o canal do updater
+(`-p:UpdateChannel=stable`): build local e de branch nunca se atualizam, e o
+Diagnóstico mostra isso.
+
+O CI assina o `update.json` com o secret `UPDATE_SIGNING_KEY` e **falha** se ele não
+existir ou não bater com a chave pública em `src/TwoG.Connector.Core/UpdateKeys/`.
+O release leva `update.json` e `update.json.sig` ao lado dos binários; na linha
+1.4.x, também cópias com os nomes da v1.3.0 (`2G-GPS-Cliente*`), para link salvo não
+dar 404.
+
+Para testar o updater sem mexer no `latest`, publique um pré-release
+(`v1.4.1-rc.1`) e aponte um app instalado para ele com a variável de ambiente
+`TWOG_UPDATE_FEED=https://github.com/galenoferreira/gps_connector/releases/download/v1.4.1-rc.1/update.json`
+(só HTTPS; a assinatura continua obrigatória). O `.env.example` lista essa e as
+demais variáveis locais de manutenção — copie para `.env`, que o git ignora, e
+nunca coloque nele o conteúdo de uma chave, só o caminho.
 
 Os arquivos do Release **não levam versão no nome** — é o que mantém os links de
-download permanentes válidos. Tags com hífen (`v1.1.0-beta.1`) entram como
+download permanentes válidos. Tags com hífen (`v1.4.1-rc.1`) entram como
 pré-release e não assumem o `latest`, preservando esses links.
 
 ### Como o .exe único funciona
@@ -292,7 +377,7 @@ avisa que componentes managed C++ não são adequados a single-file — assembli
 bundle são carregados da memória, o que não funciona para mixed-mode.
 
 Em vez disso, elas viajam como **recursos embutidos** e o
-[`SimConnectRuntime`](src/TwoG.GpsClient/Services/SimConnectRuntime.cs) as extrai
+[`SimConnectRuntime`](src/TwoG.Connector/Services/SimConnectRuntime.cs) as extrai
 para `%LOCALAPPDATA%` na primeira execução, carregando-as de arquivos reais em
 disco. Junto vão `MSVCP140.dll`, `VCRUNTIME140.dll` e `VCRUNTIME140_1.dll`, que a
 `SimConnect.dll` importa: sem elas, uma máquina que nunca instalou o Visual C++

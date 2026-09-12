@@ -1,5 +1,5 @@
 ; ══════════════════════════════════════════════════════════════════════════════
-;  2G GPS Cliente for MSFS — instalador (Inno Setup 6)
+;  2G Connector — instalador (Inno Setup 6)
 ;
 ;  Decisões (ver docs/pesquisa no repositório):
 ;   • Instalação POR USUÁRIO (PrivilegesRequired=lowest): sem UAC, e as constantes
@@ -8,7 +8,8 @@
 ;   • O app só ENVIA UDP (broadcast XGPS): não precisa de regra de firewall
 ;     (política padrão do Windows libera todo tráfego de saída).
 ;   • O registro no EXE.xml (iniciar junto com o simulador) é feito PELO APP,
-;     que se auto-repara a cada execução; o desinstalador chama "-unregister".
+;     que se auto-repara a cada execução; o instalador chama "-register" e o
+;     desinstalador, "-unregister".
 ;   • Publicação self-contained: nenhum pré-requisito de runtime .NET.
 ;
 ;  Compilar:  iscc setup.iss /DAppVersion=1.0.0
@@ -19,12 +20,18 @@
   #define AppVersion "1.0.0"
 #endif
 
-#define MyAppName "2G GPS Cliente for MSFS"
-#define MyAppShortName "2G GPS Cliente"
+#define MyAppName "2G Connector"
+#define MyAppShortName "2G Connector"
 #define MyAppPublisher "2G"
-#define MyAppExeName "2G-GPS-Cliente.exe"
+#define MyAppExeName "2G-Connector.exe"
+
+; Nomes da v1.3.0, só para limpar o que ela deixou ([InstallDelete] e [Registry]).
+#define LegacyAppName "2G GPS Cliente for MSFS"
+#define LegacyShortName "2G GPS Cliente"
+#define LegacyExeName "2G-GPS-Cliente.exe"
 
 [Setup]
+; Mesmo AppId da v1.3.0: é o que faz o instalador ATUALIZAR em vez de instalar ao lado.
 AppId={{B23B9502-7C57-45EF-9075-D53016835238}
 AppName={#MyAppName}
 AppVersion={#AppVersion}
@@ -40,11 +47,12 @@ SolidCompression=yes
 OutputDir=..\dist
 ; Nome SEM versão: é o alvo do link permanente /releases/latest/download/.
 ; A versão vai no AppVersion (visível em "Adicionar ou remover programas").
-OutputBaseFilename=2G-GPS-Cliente-Setup
-SetupIconFile=..\src\TwoG.GpsClient\Assets\app.ico
+OutputBaseFilename=2G-Connector-Setup
+SetupIconFile=..\src\TwoG.Connector\Assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 CloseApplications=yes
+; Nome herdado da v1.3.0 de propósito — ver ProductIdentity.SingleInstanceMutexName.
 AppMutex=Local\TwoG.GpsClient.SingleInstance
 
 [Languages]
@@ -72,15 +80,34 @@ Name: "autostart"; Description: "{cm:AutostartTask}"; Flags: unchecked
 [Files]
 Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Atualização sobre a v1.3.0: o exe e os atalhos com o nome antigo. Sem isto o
+; atalho velho do Menu Iniciar continuaria lá, apontando para um exe que sumiu.
+Type: files; Name: "{app}\{#LegacyExeName}"
+Type: files; Name: "{autoprograms}\{#LegacyAppName}.lnk"
+Type: files; Name: "{autodesktop}\{#LegacyShortName}.lnk"
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppShortName}"; ValueData: """{app}\{#MyAppExeName}"" -minimized"; Tasks: autostart; Flags: uninsdeletevalue
+; Valor da v1.3.0 na chave Run: removido sempre, marcada ou não a tarefa nova.
+; O "desabilitado" do Gerenciador de Tarefas vai para o nome novo em MigrateStartupApproved.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#LegacyShortName}"; Flags: deletevalue
 
 [Run]
+; Registra no EXE.xml já na instalação, se o usuário quer iniciar com o simulador.
+; Na atualização da v1.3.0 o [InstallDelete] apaga o exe antigo, e a entrada legada
+; ficaria apontando para ele até o app novo ser aberto: com a última caixa desmarcada
+; ou em modo silencioso, o simulador deixaria de lançar o conector.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "-register"; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppShortName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Reabre o conector depois de uma atualização silenciosa feita pelo updater, com
+; os argumentos que ele tinha (-minimized quando lançado pelo MSFS). O updater
+; passa /norelaunch=1 quando o piloto mandou encerrar.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "{param:relaunchargs|}"; Flags: nowait skipifnotsilent; Check: ShouldRelaunch
 
 [UninstallRun]
 ; Remove nossas entradas Launch.Addon dos EXE.xml de todas as edições do MSFS.
@@ -111,6 +138,11 @@ begin
     Result := ExpandConstant('{cm:DetectNone}');
 end;
 
+function ShouldRelaunch(): Boolean;
+begin
+  Result := ExpandConstant('{param:norelaunch|0}') <> '1';
+end;
+
 procedure InitializeWizard();
 begin
   CreateOutputMsgMemoPage(wpWelcome,
@@ -118,4 +150,29 @@ begin
     ExpandConstant('{cm:DetectDescription}'),
     ExpandConstant('{cm:DetectSubCaption}'),
     DetectSims());
+end;
+
+const
+  StartupApprovedRun = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
+
+// O Gerenciador de Tarefas guarda "desabilitado" pelo NOME do valor da chave Run, e
+// valor sem registro ali conta como habilitado. Como o nome mudou, a escolha feita
+// para o nome antigo vai junto: sem isto, quem desabilitou lá voltaria a ver o
+// conector abrindo com o Windows. O registro antigo sai sempre, como o valor da Run.
+procedure MigrateStartupApproved();
+var
+  State: AnsiString;
+begin
+  if not RegQueryBinaryValue(HKEY_CURRENT_USER, StartupApprovedRun, '{#LegacyShortName}', State) then
+    Exit;
+  if WizardIsTaskSelected('autostart') and
+     not RegValueExists(HKEY_CURRENT_USER, StartupApprovedRun, '{#MyAppShortName}') then
+    RegWriteBinaryValue(HKEY_CURRENT_USER, StartupApprovedRun, '{#MyAppShortName}', State);
+  RegDeleteValue(HKEY_CURRENT_USER, StartupApprovedRun, '{#LegacyShortName}');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    MigrateStartupApproved();
 end;

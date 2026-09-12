@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Símbolos dentro do assembly: nada de .pdb solto na pasta de publish. -->
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <!-- Chaves públicas aceitas para assinar atualizações (ver UpdateKeys.cs). -->
+  <ItemGroup>
+    <EmbeddedResource Include="UpdateKeys\*.pubkey"
+                      LogicalName="TwoG.Connector.Core.UpdateKeys.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

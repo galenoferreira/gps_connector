@@ -16,9 +16,13 @@ env:
   # https://github.com/<owner>/<repo>/releases/latest/download/<nome>
   # que sempre apontam para o release mais recente. Se a versão entrar no nome
   # do arquivo, esses links quebram a cada release.
-  EXE_NAME: 2G-GPS-Cliente.exe
-  ZIP_NAME: 2G-GPS-Cliente.zip
-  SETUP_NAME: 2G-GPS-Cliente-Setup.exe
+  EXE_NAME: 2G-Connector.exe
+  ZIP_NAME: 2G-Connector.zip
+  SETUP_NAME: 2G-Connector-Setup.exe
+  # Nomes da v1.3.0 — ver o passo "Stage release assets".
+  LEGACY_EXE_NAME: 2G-GPS-Cliente.exe
+  LEGACY_ZIP_NAME: 2G-GPS-Cliente.zip
+  LEGACY_SETUP_NAME: 2G-GPS-Cliente-Setup.exe
 
 jobs:
   build:
@@ -42,17 +46,18 @@ jobs:
           echo "Versão: $v"
 
       - name: Test
-        run: dotnet test tests/TwoG.GpsClient.Core.Tests/TwoG.GpsClient.Core.Tests.csproj -c Release
+        run: dotnet test tests/TwoG.Connector.Core.Tests/TwoG.Connector.Core.Tests.csproj -c Release
 
       # Produz UM único .exe autocontido: as opções de single-file estão no csproj
       # (PublishSingleFile, SelfContained, IncludeNativeLibrariesForSelfExtract,
       # EnableCompressionInSingleFile) junto com RuntimeIdentifier=win-x64.
       - name: Publish (single-file)
         run: >
-          dotnet publish src/TwoG.GpsClient/TwoG.GpsClient.csproj
+          dotnet publish src/TwoG.Connector/TwoG.Connector.csproj
           -c Release
           -p:PublishReadyToRun=true
           -p:Version=${{ env.VERSION }}
+          -p:UpdateChannel=${{ startsWith(github.ref, 'refs/tags/v') && 'stable' || '' }}
           -o publish
 
       - name: Verify single-file output
@@ -81,6 +86,32 @@ jobs:
           if (-not (Test-Path "dist\$env:SETUP_NAME")) {
             throw "Instalador não encontrado em dist\$env:SETUP_NAME"
           }
+          # Cópias com o nome da v1.3.0, para link salvo e página em cache não darem
+          # 404. Só na linha 1.4.x: somem sozinhas a partir da v1.5.0.
+          if ($env:VERSION -like '1.4.*') {
+            Copy-Item "dist\$env:EXE_NAME"   "dist\$env:LEGACY_EXE_NAME"
+            Copy-Item "dist\$env:ZIP_NAME"   "dist\$env:LEGACY_ZIP_NAME"
+            Copy-Item "dist\$env:SETUP_NAME" "dist\$env:LEGACY_SETUP_NAME"
+          }
+
+      # Manifesto do auto-update, assinado. Só em tag: é o que os apps instalados
+      # vão aceitar. Sem o secret o release FALHA — nunca se publica manifesto sem
+      # assinatura. A ferramenta confere a assinatura contra a chave embutida no app.
+      - name: Sign update manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:UPDATE_SIGNING_KEY) {
+            throw "Secret UPDATE_SIGNING_KEY ausente: release sem manifesto assinado não sai."
+          }
+          dotnet run --project tools/TwoG.Connector.ReleaseSigner/TwoG.Connector.ReleaseSigner.csproj -c Release -- dist $env:VERSION $env:EXE_NAME $env:SETUP_NAME
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao assinar o manifesto." }
+
+      - name: Checksums
+        shell: pwsh
+        run: |
           # Checksums para quem quiser conferir o download
           Get-FileHash "dist\*" -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
@@ -90,7 +121,7 @@ jobs:
 
       - uses: actions/upload-artifact@v5
         with:
-          name: 2G-GPS-Cliente-${{ env.VERSION }}
+          name: 2G-Connector-${{ env.VERSION }}
           path: dist/*
           if-no-files-found: error
 
@@ -110,11 +141,12 @@ jobs:
 
             | Arquivo | Para quem |
             |---|---|
-            | [`2G-GPS-Cliente.exe`](https://github.com/${{ github.repository }}/releases/latest/download/2G-GPS-Cliente.exe) | **Recomendado** — executável único, sem instalação |
-            | [`2G-GPS-Cliente.zip`](https://github.com/${{ github.repository }}/releases/latest/download/2G-GPS-Cliente.zip) | Mesmo executável, compactado |
-            | [`2G-GPS-Cliente-Setup.exe`](https://github.com/${{ github.repository }}/releases/latest/download/2G-GPS-Cliente-Setup.exe) | Instalador com atalho no Menu Iniciar e desinstalador |
+            | [`2G-Connector.exe`](https://github.com/${{ github.repository }}/releases/latest/download/2G-Connector.exe) | **Recomendado** — executável único, sem instalação |
+            | [`2G-Connector.zip`](https://github.com/${{ github.repository }}/releases/latest/download/2G-Connector.zip) | Mesmo executável, compactado |
+            | [`2G-Connector-Setup.exe`](https://github.com/${{ github.repository }}/releases/latest/download/2G-Connector-Setup.exe) | Instalador com atalho no Menu Iniciar e desinstalador |
 
-            Requer Windows 10/11 x64 e MSFS 2020 ou 2024. Não precisa do runtime .NET.
+            Requer Windows 10/11 x64 e MSFS 2020/2024, Prepar3D v4+ ou X-Plane 11/12. Não precisa do runtime .NET.
+            A partir desta versão o app se atualiza sozinho, sempre fora de voo.
 
             > Ao abrir pela primeira vez o Windows pode exibir *"O Windows protegeu seu
             > computador"* (executável sem assinatura digital): clique em
