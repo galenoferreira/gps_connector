@@ -1651,7 +1651,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `sealed class ControlSession(ISimControl control, PairedDeviceStore devices, PairingCodes codes, string connectorVersion, Func<DateTime>? utcNow = null)` (o relógio padrão é monotônico: só mede as janelas de taxa) com `Phase`, `ReadyForPush` (pareada e com o pacote de boas-vindas já enviado), `MarkWelcomeSent()`, `DeviceId`, `DeviceName`, `LastCommand` (resumo para o Diagnóstico), `Handle(string json) : SessionOutput`, `StateMessage() : string`, `ControlsMessage() : string`, e as constantes `MaxCommandsPerSecond = 20`, `MaxRefusalsPer10Seconds = 100`, `CloseProtocolUnsupported = 4002`, `CloseRateLimited = 4008`
   - Helper de teste `FakeSimControl : ISimControl` com `Submitted`, `FailWith`, `RaiseChanged()`
 
-A sessão não sabe nada de socket: recebe o texto de uma mensagem e devolve o que enviar e se deve fechar. É isso que a torna testável sem rede. A validação pelo catálogo e pela lista de controles da aeronave acontece **aqui**, antes de o comando chegar ao `ISimControl`.
+A sessão não sabe nada de socket: recebe o texto de uma mensagem e devolve o que enviar e se deve fechar. É isso que a torna testável sem rede. A validação pelo catálogo e pela lista de controles da aeronave acontece **aqui**, antes de o comando chegar ao `ISimControl`. A ordem é: catálogo (`out_of_range`, ou `unsupported` para controle desconhecido) → sem simulador (`SimulatorName` null) `sim_not_connected` → fora de `AvailableControls` `unsupported` → `Submit`. Sem simulador a lista de controles vem vazia, e checá-la antes do nome daria `unsupported` onde a tabela de erros do 01 reserva `sim_not_connected`. É coerente com o `CompositeSimControl` da Tarefa 9, cujo `SimulatorName` é o da fonte ativa e só é null sem fonte ativa; um X-Plane conectado (nome presente, lista vazia) continua `unsupported`.
 
 - [ ] **Passo 1: O simulador falso dos testes**
 
@@ -1885,6 +1885,34 @@ public class ControlSessionTests : IDisposable
     }
 
     [Fact]
+    public void WithoutSimulatorAValidSetIsSimNotConnected()
+    {
+        // Sem simulador a lista de controles também vem vazia: o erro é a falta dele, não unsupported.
+        _sim.SimulatorName = null;
+        _sim.AvailableControls = [];
+
+        var result = Json(PairedSession().Handle(Set("a1", "com1.standby", 118_500_000)).Messages[0]);
+
+        Assert.Equal("sim_not_connected", result.GetProperty("error").GetString());
+        Assert.Empty(_sim.Submitted);
+    }
+
+    [Fact]
+    public void WithoutSimulatorTheCatalogStillComesFirst()
+    {
+        _sim.SimulatorName = null;
+        _sim.AvailableControls = [];
+        var session = PairedSession();
+
+        var outOfRange = Json(session.Handle(Set("a1", "com1.standby", 118_020_000)).Messages[0]);
+        var unknown = Json(session.Handle(Set("a2", "com9.active", 121_900_000)).Messages[0]);
+
+        Assert.Equal("out_of_range", outOfRange.GetProperty("error").GetString());
+        Assert.Equal("unsupported", unknown.GetProperty("error").GetString());
+        Assert.Empty(_sim.Submitted);
+    }
+
+    [Fact]
     public void SimulatorRefusalIsPassedThrough()
     {
         _sim.FailWith = ControlErrors.SimNotConnected;
@@ -1981,7 +2009,7 @@ public class ControlSessionTests : IDisposable
         var session = PairedSession();
         _sim.AvailableControls = ["xpdr.code"];
 
-        var controls = Json(session.ControlsMessage()).GetProperty("controls").EnumerateArray().Select(e => e.GetString()).ToArray();
+        var controls = Json(session.ControlsMessage()).GetProperty("controls").EnumerateArray().Select(e => e.GetString()!).ToArray();
 
         Assert.Equal(["xpdr.code"], controls);
     }
@@ -2168,8 +2196,13 @@ public sealed class ControlSession
         }
         _recentCommands.Enqueue(now);
 
+        // Catálogo primeiro: faixa, espaçamento e controle desconhecido não dependem do
+        // simulador. Depois o simulador: sem ele a lista de controles vem vazia, e checá-la
+        // antes daria unsupported onde o spec 01 reserva sim_not_connected.
         var error = RadioCatalog.Validate(command.Control, command.Kind, command.Value);
-        if (error is null && !_control.AvailableControls.Contains(command.Control))
+        if (error is null && _control.SimulatorName is null)
+            error = ControlErrors.SimNotConnected;
+        else if (error is null && !_control.AvailableControls.Contains(command.Control))
             error = ControlErrors.Unsupported;
 
         var result = error is null ? _control.Submit(command) : ControlResult.Fail(command.Id, error);
@@ -2225,7 +2258,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Produz:
   - `sealed record ControlServerOptions` com `HelloTimeout` (10 s), `PushInterval` (100 ms), `KeepAliveInterval` (15 s), `KeepAliveTimeout` (30 s)
   - `sealed record ConnectedDevice(string? DeviceId, string? DeviceName, bool Paired)`
-  - `sealed class ControlServer(ISimControl control, PairedDeviceStore devices, PairingCodes codes, string connectorVersion, ControlServerOptions? options = null) : IDisposable` com `Path = "/control"`, `MaxConnections = 4`, `MaxMessageBytes = 4096`, `CloseRevoked = 4001`, `CloseBusy = 4003`, `Start(int port)`, `Stop()`, `Port`, `IsRunning`, `LastError`, `LastCommand`, `Connected : IReadOnlyList<ConnectedDevice>`, evento `ConnectionsChanged`
+  - `sealed class ControlServer(ISimControl control, PairedDeviceStore devices, PairingCodes codes, string connectorVersion, ControlServerOptions? options = null) : IDisposable` com `Path = "/control"`, `MaxConnections = 4`, `MaxMessageBytes = 4096`, `CloseRevoked = 4001`, `CloseBusy = 4003`, `Start(int port)`, `Stop()` (não bloqueia), `Dispose()` (para e espera os fechamentos, por até 2 s), `Port`, `IsRunning`, `LastError`, `LastCommand`, `Connected : IReadOnlyList<ConnectedDevice>`, evento `ConnectionsChanged`
 
 Decisões de implementação, todas vindas do 01:
 - **O upgrade HTTP é feito à mão**, lendo os cabeçalhos byte a byte até a linha em branco (limite de 8 KB, prazo de 5 s). O cliente só manda quadros WebSocket depois do `101`, então ler além dos cabeçalhos é impossível. Falhas respondem `405` (não é GET), `404` (outro caminho) e `400` (sem os cabeçalhos de WebSocket).
@@ -2235,8 +2268,9 @@ Decisões de implementação, todas vindas do 01:
 - **O nome do simulador é conferido a cada tick do laço de envio**, contra o último visto (`_lastSimulatorName`, que começa com o nome do construtor para não gerar um `state` extra no primeiro tick). Ele pode mudar sem `Changed`: na Tarefa 9 o `CompositeSimControl` passa a responder com o nome da fonte ativa, e o X-Plane, que não tem `ISimControl`, conecta e cai sem avisar ninguém. Nome diferente conta como aviso do simulador (anda `_changeGeneration` e marca `_dirty`), então sai um `state` com o nome novo, ou com `null` quando ele fecha, como o 01 manda "a cada mudança".
 - **Um envio de cada vez por conexão** (`SemaphoreSlim`), porque o `WebSocket` não aceita dois `SendAsync` simultâneos.
 - **`LastCommand` do servidor só muda quando a mensagem foi um comando.** `ControlSession.LastCommand` guarda o último da sessão; copiar depois de qualquer `Handle` faria um `type` desconhecido, uma mensagem inválida ou um `rate_limited` do aparelho A trazer de volta o comando antigo de A por cima do mais novo de B. O laço guarda a referência antes do `Handle` e só copia se ela mudou (cada comando gera uma string nova na sessão).
-- **`Stop()` fecha com 1000 antes de cancelar.** Cada conexão tem um `ReceiveAsync` pendente com o token do servidor, e cancelar uma leitura pendente aborta o `WebSocket`: cancelando primeiro, o quadro de fechamento nunca sairia. Os fechamentos rodam num `Task.Run` (fora do contexto da interface, que é quem chama o `Stop`) e o cancelamento vem quando o laço de recepção de cada conexão recebeu o `Close` do app e a soltou (`Connection.Finished`), ou em 2 s. Cancelar assim que o 1000 é escrito abortaria a leitura antes de a resposta chegar (numa Wi-Fi, um RTT), e o TCP seria solto com ela em trânsito. Nada bloqueia quem chamou. Os laços de accept e de envio saem na hora, porque o listener deixou de ser o atual: num `Stop` seguido de `Start` não há dois laços mandando `state`.
-- **Nada roda no contexto de quem chama.** Na Tarefa 10, `Start`, `Stop` e a remoção do aparelho vêm da thread do WPF (`ControlService.Apply` no `OnStartup` e no botão Aplicar, botão Remover). Um `_ = AcceptLoopAsync(...)` direto capturaria o contexto dela, e toda continuação — accept, upgrade, `ReceiveAsync`, `Handle`, gravação do `paired-devices.json`, o envio de 10 `state`/s — cairia no Dispatcher, contra o "roda na própria thread" do 01. Por isso o `Start` inicia os dois laços com `Task.Run`, a remoção faz o mesmo com o fechamento 4001, e o `Stop` já usava `Task.Run` e `ContinueWith` com `TaskScheduler.Default`. O teste instala um `SynchronizationContext` que conta `Post` (e roda o trabalho com ele mesmo instalado, como o Dispatcher) só durante as chamadas de `Start`, `Remove` e `Stop`, e confere que a contagem termina em zero.
+- **`Stop()` fecha com 1000 antes de cancelar.** Cada conexão tem um `ReceiveAsync` pendente com o token do servidor, e cancelar uma leitura pendente aborta o `WebSocket`: cancelando primeiro, o quadro de fechamento nunca sairia. Os fechamentos rodam num `Task.Run` (fora do contexto da interface, que é quem chama o `Stop`) e o cancelamento vem quando o laço de recepção de cada conexão recebeu o `Close` do app e a soltou (`Connection.Finished`), ou em 2 s. Cancelar assim que o 1000 é escrito abortaria a leitura antes de a resposta chegar (numa Wi-Fi, um RTT), e o TCP seria solto com ela em trânsito. Nada bloqueia quem chamou: o `Stop` é o que o botão Aplicar usa. Os laços de accept e de envio saem na hora, porque o listener deixou de ser o atual: num `Stop` seguido de `Start` não há dois laços mandando `state`.
+- **`Dispose()` espera os fechamentos; `Stop()` não.** O `Dispose` é a saída do app (`ControlService.Dispose`, chamado no `App.OnExit`), e sem esperar o processo terminaria antes de o 1000 ir para a rede, contra o "ao encerrar o Connector, fecha com 1000" do 01. O `Stop` guarda a tarefa de fechamento em `_closing`, e o `Dispose` chama o `Stop` e espera essa tarefa ou 2 s (`CloseTimeout`), o que vier primeiro: um app que responde libera a saída na hora, um que não responde a segura no máximo pelo mesmo prazo que já o soltaria. Bloquear a thread da interface ali não dá deadlock, porque fechamentos, recepção e prazo rodam no pool e nada passa pelo contexto dela (o `ConnectionsChanged`, disparado no `finally` antes do `Finished`, não tem assinante no app, que é orientado por polling). Como o `Dispose` da classe de teste agora espera, ela aborta os `ClientWebSocket` que abriu antes de dispor o servidor; sem isso cada teste com um cliente aberto sem ler pesaria 2 s a mais.
+- **Nada roda no contexto de quem chama.** Na Tarefa 10, `Start`, `Stop` e a remoção do aparelho vêm da thread do WPF (`ControlService.Apply` no `OnStartup` e no botão Aplicar, botão Remover). Um `_ = AcceptLoopAsync(...)` direto capturaria o contexto dela, e toda continuação — accept, upgrade, `ReceiveAsync`, `Handle`, gravação do `paired-devices.json`, o envio de 10 `state`/s — cairia no Dispatcher, contra o "roda na própria thread" do 01. Por isso o `Start` inicia os dois laços com `Task.Run`, a remoção faz o mesmo com o fechamento 4001, e o `Stop` já usava `Task.Run` e `ContinueWith` com `TaskScheduler.Default`. O teste instala um `SynchronizationContext` que conta `Post` (e roda o trabalho com ele mesmo instalado, como o Dispatcher) só durante as chamadas de `Start`, `Remove`, `Stop` e `Dispose`, e confere que a contagem termina em zero.
 - **A remoção do aparelho tem o mesmo prazo de 2 s do `Stop`.** O 4001 sai e o laço de recepção continua lendo à espera do `Close` do app; um app que não responde nem manda quadro deixaria a conexão em `Connected`, segurando uma das 4 vagas até o TCP cair (ou até o keep-alive, 45 s). Passados 2 s com a conexão ainda na lista, `RevokeAsync` aborta o socket: a leitura pendente falha, o `finally` do laço tira a conexão, devolve a vaga e dispara `ConnectionsChanged`. O abort também solta um envio travado que segurava o lock do fechamento.
 - **O accept só termina com o servidor parado.** Uma `SocketException` qualquer (no Windows, `ConnectionReset` de uma conexão desfeita na fila antes do accept) volta ao laço. Sair deixaria o servidor surdo com `IsRunning` verdadeiro, e o `ControlService.Apply` nunca o reiniciaria.
 - **Fechamento por iniciativa do servidor espera a resposta do app** (`CloseAndDrainAsync`: 1009, 4002, 4003, 4008). Descarta o que chegar até o `Close` do app, por no máximo 2 s. Soltar o TCP com bytes não lidos manda RST, e no Windows o RST apaga do lado de lá o quadro que acabou de sair. No `Stop` e na remoção do aparelho o laço de recepção continua lendo e é ele quem recebe a resposta. Um quadro de dados que chegue com o fechamento já decidido não passa pelo `Handle` — o `set` de um aparelho removido não pode chegar ao simulador — e o laço passa a descartar até o `Close` do app (`DrainAsync`, 2 s), em vez de sair com o quadro dele em trânsito. "Decidido" é a marca `Connection.Closing`, posta por `Stop` e pela remoção na hora, antes do `Task.Run`, e não só o estado `CloseSent`: o quadro de fechamento sai numa tarefa do pool, e um `set` que chegue antes de ela rodar passaria. Por isso o `DrainAsync` lê também com o estado ainda `Open`.
@@ -2248,6 +2282,7 @@ Decisões de implementação, todas vindas do 01:
 `tests/TwoG.Connector.Core.Tests/ControlServerTests.cs`:
 
 ```csharp
+using System.Diagnostics;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
@@ -2268,6 +2303,7 @@ public class ControlServerTests : IDisposable
     private readonly PairingCodes _codes = new();
     private readonly PairedDeviceStore _devices;
     private readonly ControlServer _server;
+    private readonly List<ClientWebSocket> _clients = [];
 
     public ControlServerTests()
     {
@@ -2283,6 +2319,11 @@ public class ControlServerTests : IDisposable
 
     public void Dispose()
     {
+        // O Dispose do servidor espera cada app responder ao 1000, por até 2 s: um cliente que
+        // o teste deixou aberto sem ler pesaria 2 s a mais em cada teste. Abortado, ele solta a
+        // conexão na hora.
+        foreach (var client in _clients)
+            client.Abort();
         _server.Dispose();
         _tmp.Dispose();
     }
@@ -2292,6 +2333,7 @@ public class ControlServerTests : IDisposable
     private async Task<ClientWebSocket> ConnectAsync()
     {
         var ws = new ClientWebSocket();
+        _clients.Add(ws);
         await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{_server.Port}{ControlServer.Path}"), Timeout());
         return ws;
     }
@@ -2597,6 +2639,37 @@ public class ControlServerTests : IDisposable
         await WaitForNoConnectionsAsync();   // o app nunca responde: o prazo de 2 s solta a conexão
     }
 
+    [Fact]
+    public async Task DisposingWaitsUntilTheClientHasThe1000()
+    {
+        // Saída do app: sem esperar, o processo terminaria antes de o 1000 ir para a rede.
+        var (ws, _) = await PairAsync();
+        var closeStatus = new TaskCompletionSource<int?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var app = Task.Run(async () =>
+        {
+            closeStatus.SetResult(await ExpectCloseAsync(ws));
+            await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());   // responde como o app
+        });
+
+        _server.Dispose();
+
+        Assert.True(closeStatus.Task.IsCompleted, "o Dispose voltou antes de o app receber o fechamento");
+        Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await closeStatus.Task);
+        await app;
+    }
+
+    [Fact]
+    public async Task DisposingGivesUpOnASilentClient()
+    {
+        var (ws, _) = await PairAsync();   // o app nunca lê o 1000 nem responde
+
+        var elapsed = Stopwatch.StartNew();
+        _server.Dispose();
+
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(3), $"o Dispose levou {elapsed.Elapsed}");
+        GC.KeepAlive(ws);
+    }
+
     private async Task WaitForNoConnectionsAsync()
     {
         var deadline = DateTime.UtcNow.AddSeconds(5);
@@ -2777,6 +2850,21 @@ public class ControlServerTests : IDisposable
         await other.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
         await WaitForNoConnectionsAsync();
 
+        // A saída do app bloqueia a thread da interface no Dispose: se algo do fechamento
+        // dependesse dela, seria deadlock no Windows.
+        RunOn(ui, () => _server.Start(0));
+        var last = await ConnectAsync();
+        await SendAsync(last, Hello);
+        await ExpectAsync(last, "pairing_required");
+        var answered = Task.Run(async () =>
+        {
+            await ExpectCloseAsync(last);
+            await last.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
+        });
+        RunOn(ui, () => _server.Dispose());
+        await answered;
+        Assert.Empty(_server.Connected);
+
         Assert.Equal(0, ui.Posts);
     }
 
@@ -2878,6 +2966,7 @@ public sealed class ControlServer : IDisposable
     private readonly ConcurrentDictionary<Connection, byte> _connections = new();
     private TcpListener? _listener;
     private CancellationTokenSource? _cancellation;
+    private Task? _closing;   // fechamentos do último Stop: o Dispose espera por eles
     private int _slots;
     private volatile bool _dirty;
     private long _changeGeneration;   // conta os avisos do simulador; ver o pareamento no laço de recepção
@@ -2971,7 +3060,7 @@ public sealed class ControlServer : IDisposable
         // o Close do app e a soltou, ou em 2 s, o que vier antes (um app que não responde, ou
         // um envio travado, que segura o lock de envio até o cancelamento). A marca de
         // fechamento vem antes, aqui mesmo: um quadro que chegue enquanto o 1000 ainda não saiu
-        // também não vira comando.
+        // também não vira comando. Quem precisa esperar é o Dispose, pela tarefa guardada.
         var connections = _connections.Keys.ToArray();
         foreach (var connection in connections)
             connection.MarkClosing();
@@ -2981,6 +3070,7 @@ public sealed class ControlServer : IDisposable
                 c => c.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connector encerrando")));
             await Task.WhenAll(connections.Select(c => c.Finished));
         });
+        _closing = closing;
         _ = Task.WhenAny(closing, Task.Delay(CloseTimeout)).ContinueWith(_ =>
         {
             cancellation.Cancel();
@@ -2988,7 +3078,25 @@ public sealed class ControlServer : IDisposable
         }, TaskScheduler.Default);
     }
 
-    public void Dispose() => Stop();
+    /// <summary>
+    /// Para como o <see cref="Stop"/> e ESPERA os fechamentos: roda na saída do app, e sem
+    /// esperar o processo terminaria antes de o 1000 ir para a rede (spec 01). Volta quando
+    /// cada app respondeu ao fechamento, ou em 2 s, o mesmo prazo que solta um app que não
+    /// responde. Bloquear a thread da interface aqui não trava nada: fechamentos, recepção e
+    /// prazo rodam todos no pool, e nenhum deles passa pelo contexto dela.
+    /// </summary>
+    public void Dispose()
+    {
+        Stop();
+        try
+        {
+            _closing?.Wait(CloseTimeout);
+        }
+        catch (Exception)
+        {
+            // Os fechamentos já engolem as falhas de cada conexão; nada aqui impede a saída.
+        }
+    }
 
     private void OnDeviceRemoved(string deviceId)
     {
@@ -4634,7 +4742,7 @@ A criação do ViewModel passa `_control` como último argumento:
 
 Depois de `_broadcaster.Start();` (o anúncio sai pelo broadcaster): `_control?.Apply();`
 
-Em `OnExit`, antes de `_broadcaster?.Dispose();`: `_control?.Dispose();`
+Em `OnExit`, antes de `_broadcaster?.Dispose();`: `_control?.Dispose();`. Ele leva ao `ControlServer.Dispose`, que espera cada app responder ao 1000 por até 2 s (Tarefa 7): é o que faz o fechamento sair antes de o processo terminar. Roda na thread da interface sem risco de deadlock, porque nada do fechamento passa por ela.
 
 - [ ] **Passo 4: ViewModel**
 
@@ -4666,7 +4774,9 @@ public sealed record PairedDeviceItem(string Id, string Name, string Detail);
 
     public ObservableCollection<PairedDeviceItem> PairedDevices { get; } = [];
 
-    private string _devicesSignature = "";
+    // null = "reconstruir no próximo Refresh". Não pode ser "": é a assinatura da lista vazia,
+    // e remover o último aparelho não limparia a lista.
+    private string? _devicesSignature;
 ```
 
 e, no bloco de configurações: `[ObservableProperty] private bool _allowControlInput;` e `[ObservableProperty] private string _controlPortInput = "";`
@@ -4680,10 +4790,14 @@ e, no bloco de configurações: `[ObservableProperty] private bool _allowControl
 
 6. Em `Refresh()`, logo depois de `UpdateUpdaterStatus();`: `UpdateControlStatus();`
 
-7. Em `UpdateDiagnostics()`, a lista de erros ganha o do servidor:
+7. Em `UpdateDiagnostics()`, a lista de erros ganha o do servidor, só com o controle ligado (o `Stop` não limpa o `LastError`, e um erro de porta antigo acusaria um canal que o próprio piloto desligou):
 
 ```csharp
-            new[] { sendError, discoveryError, _updates?.LastError, _control?.Server.LastError }.Where(e => e is { Length: > 0 }));
+        // O Stop do servidor não limpa o LastError: com o controle desligado nas Configurações,
+        // um erro de porta antigo acusaria um canal que o próprio piloto desligou.
+        var controlError = _settings.AllowControl ? _control?.Server.LastError : null;
+        DiagLastError = string.Join("  •  ",
+            new[] { sendError, discoveryError, _updates?.LastError, controlError }.Where(e => e is { Length: > 0 }));
 ```
 
 8. Em `ApplySettings()`, logo depois do bloco que valida `XattHzInput`:
@@ -4705,6 +4819,19 @@ depois de `_settings.AutoUpdate = AutoUpdateInput;`:
 ```
 
 e depois de `_broadcaster.UpdateSettings(_settings);`: `_control?.Apply();`
+
+No fim, o feedback do Aplicar acusa a falha do canal. Com a porta nova ocupada, o `ControlServer.Start` já fechou as conexões (o `Stop` vem antes do bind), os iPads caíram e o canal ficou fora; o card Controle mostra o erro, mas pode estar fora da tela. A falha vai junto da mensagem, no mesmo padrão do `SyncAutoStart`, e em vermelho. A linha `ShowFeedback($"Configurações aplicadas ✓{extra}", isError: false);` passa a ser:
+
+```csharp
+        var extra = SyncAutoStart();
+        // Porta nova ocupada: o Start fecha as conexões antes do bind, então os iPads caíram e
+        // o canal ficou fora. O card Controle mostra o erro, mas pode estar fora da tela (o
+        // conteúdo rola): ele vai junto do feedback do Aplicar, em vermelho.
+        var controlFailure = _settings.AllowControl && _control is { Server.IsRunning: false } control
+            ? $" — controle pelo 2G Pilot: {control.Server.LastError ?? "servidor parado"}"
+            : "";
+        ShowFeedback($"Configurações aplicadas ✓{extra}{controlFailure}", isError: controlFailure.Length > 0);
+```
 
 9. Métodos novos, depois de `UpdateUpdaterStatus()`:
 
@@ -4811,7 +4938,7 @@ e depois de `_broadcaster.UpdateSettings(_settings);`: `_control?.Apply();`
             return;
 
         _control.Devices.Remove(deviceId);   // derruba a conexão dele com 4001
-        _devicesSignature = "";
+        _devicesSignature = null;
         Refresh();
     }
 ```

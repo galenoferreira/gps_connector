@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
@@ -18,6 +19,7 @@ public class ControlServerTests : IDisposable
     private readonly PairingCodes _codes = new();
     private readonly PairedDeviceStore _devices;
     private readonly ControlServer _server;
+    private readonly List<ClientWebSocket> _clients = [];
 
     public ControlServerTests()
     {
@@ -33,6 +35,11 @@ public class ControlServerTests : IDisposable
 
     public void Dispose()
     {
+        // O Dispose do servidor espera cada app responder ao 1000, por até 2 s: um cliente que
+        // o teste deixou aberto sem ler pesaria 2 s a mais em cada teste. Abortado, ele solta a
+        // conexão na hora.
+        foreach (var client in _clients)
+            client.Abort();
         _server.Dispose();
         _tmp.Dispose();
     }
@@ -42,6 +49,7 @@ public class ControlServerTests : IDisposable
     private async Task<ClientWebSocket> ConnectAsync()
     {
         var ws = new ClientWebSocket();
+        _clients.Add(ws);
         await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{_server.Port}{ControlServer.Path}"), Timeout());
         return ws;
     }
@@ -347,6 +355,37 @@ public class ControlServerTests : IDisposable
         await WaitForNoConnectionsAsync();   // o app nunca responde: o prazo de 2 s solta a conexão
     }
 
+    [Fact]
+    public async Task DisposingWaitsUntilTheClientHasThe1000()
+    {
+        // Saída do app: sem esperar, o processo terminaria antes de o 1000 ir para a rede.
+        var (ws, _) = await PairAsync();
+        var closeStatus = new TaskCompletionSource<int?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var app = Task.Run(async () =>
+        {
+            closeStatus.SetResult(await ExpectCloseAsync(ws));
+            await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());   // responde como o app
+        });
+
+        _server.Dispose();
+
+        Assert.True(closeStatus.Task.IsCompleted, "o Dispose voltou antes de o app receber o fechamento");
+        Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await closeStatus.Task);
+        await app;
+    }
+
+    [Fact]
+    public async Task DisposingGivesUpOnASilentClient()
+    {
+        var (ws, _) = await PairAsync();   // o app nunca lê o 1000 nem responde
+
+        var elapsed = Stopwatch.StartNew();
+        _server.Dispose();
+
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(3), $"o Dispose levou {elapsed.Elapsed}");
+        GC.KeepAlive(ws);
+    }
+
     private async Task WaitForNoConnectionsAsync()
     {
         var deadline = DateTime.UtcNow.AddSeconds(5);
@@ -526,6 +565,21 @@ public class ControlServerTests : IDisposable
         Assert.Equal((int)WebSocketCloseStatus.NormalClosure, await ExpectCloseAsync(other));
         await other.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
         await WaitForNoConnectionsAsync();
+
+        // A saída do app bloqueia a thread da interface no Dispose: se algo do fechamento
+        // dependesse dela, seria deadlock no Windows.
+        RunOn(ui, () => _server.Start(0));
+        var last = await ConnectAsync();
+        await SendAsync(last, Hello);
+        await ExpectAsync(last, "pairing_required");
+        var answered = Task.Run(async () =>
+        {
+            await ExpectCloseAsync(last);
+            await last.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Timeout());
+        });
+        RunOn(ui, () => _server.Dispose());
+        await answered;
+        Assert.Empty(_server.Connected);
 
         Assert.Equal(0, ui.Posts);
     }

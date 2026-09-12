@@ -189,6 +189,34 @@ public class ControlSessionTests : IDisposable
     }
 
     [Fact]
+    public void WithoutSimulatorAValidSetIsSimNotConnected()
+    {
+        // Sem simulador a lista de controles também vem vazia: o erro é a falta dele, não unsupported.
+        _sim.SimulatorName = null;
+        _sim.AvailableControls = [];
+
+        var result = Json(PairedSession().Handle(Set("a1", "com1.standby", 118_500_000)).Messages[0]);
+
+        Assert.Equal("sim_not_connected", result.GetProperty("error").GetString());
+        Assert.Empty(_sim.Submitted);
+    }
+
+    [Fact]
+    public void WithoutSimulatorTheCatalogStillComesFirst()
+    {
+        _sim.SimulatorName = null;
+        _sim.AvailableControls = [];
+        var session = PairedSession();
+
+        var outOfRange = Json(session.Handle(Set("a1", "com1.standby", 118_020_000)).Messages[0]);
+        var unknown = Json(session.Handle(Set("a2", "com9.active", 121_900_000)).Messages[0]);
+
+        Assert.Equal("out_of_range", outOfRange.GetProperty("error").GetString());
+        Assert.Equal("unsupported", unknown.GetProperty("error").GetString());
+        Assert.Empty(_sim.Submitted);
+    }
+
+    [Fact]
     public void SimulatorRefusalIsPassedThrough()
     {
         _sim.FailWith = ControlErrors.SimNotConnected;

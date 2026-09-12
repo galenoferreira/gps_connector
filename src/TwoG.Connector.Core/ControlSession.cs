@@ -168,8 +168,13 @@ public sealed class ControlSession
         }
         _recentCommands.Enqueue(now);
 
+        // Catálogo primeiro: faixa, espaçamento e controle desconhecido não dependem do
+        // simulador. Depois o simulador: sem ele a lista de controles vem vazia, e checá-la
+        // antes daria unsupported onde o spec 01 reserva sim_not_connected.
         var error = RadioCatalog.Validate(command.Control, command.Kind, command.Value);
-        if (error is null && !_control.AvailableControls.Contains(command.Control))
+        if (error is null && _control.SimulatorName is null)
+            error = ControlErrors.SimNotConnected;
+        else if (error is null && !_control.AvailableControls.Contains(command.Control))
             error = ControlErrors.Unsupported;
 
         var result = error is null ? _control.Submit(command) : ControlResult.Fail(command.Id, error);

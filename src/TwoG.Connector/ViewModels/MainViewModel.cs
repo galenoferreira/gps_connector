@@ -757,7 +757,13 @@ public partial class MainViewModel : ObservableObject
             _ = Task.Run(updates.CheckNowAsync);
 
         var extra = SyncAutoStart();
-        ShowFeedback($"Configurações aplicadas ✓{extra}", isError: false);
+        // Porta nova ocupada: o Start fecha as conexões antes do bind, então os iPads caíram e
+        // o canal ficou fora. O card Controle mostra o erro, mas pode estar fora da tela (o
+        // conteúdo rola): ele vai junto do feedback do Aplicar, em vermelho.
+        var controlFailure = _settings.AllowControl && _control is { Server.IsRunning: false } control
+            ? $" — controle pelo 2G Pilot: {control.Server.LastError ?? "servidor parado"}"
+            : "";
+        ShowFeedback($"Configurações aplicadas ✓{extra}{controlFailure}", isError: controlFailure.Length > 0);
         Refresh();
     }
 

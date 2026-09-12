@@ -44,6 +44,7 @@ public sealed class ControlServer : IDisposable
     private readonly ConcurrentDictionary<Connection, byte> _connections = new();
     private TcpListener? _listener;
     private CancellationTokenSource? _cancellation;
+    private Task? _closing;   // fechamentos do último Stop: o Dispose espera por eles
     private int _slots;
     private volatile bool _dirty;
     private long _changeGeneration;   // conta os avisos do simulador; ver o pareamento no laço de recepção
@@ -137,7 +138,7 @@ public sealed class ControlServer : IDisposable
         // o Close do app e a soltou, ou em 2 s, o que vier antes (um app que não responde, ou
         // um envio travado, que segura o lock de envio até o cancelamento). A marca de
         // fechamento vem antes, aqui mesmo: um quadro que chegue enquanto o 1000 ainda não saiu
-        // também não vira comando.
+        // também não vira comando. Quem precisa esperar é o Dispose, pela tarefa guardada.
         var connections = _connections.Keys.ToArray();
         foreach (var connection in connections)
             connection.MarkClosing();
@@ -147,6 +148,7 @@ public sealed class ControlServer : IDisposable
                 c => c.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connector encerrando")));
             await Task.WhenAll(connections.Select(c => c.Finished));
         });
+        _closing = closing;
         _ = Task.WhenAny(closing, Task.Delay(CloseTimeout)).ContinueWith(_ =>
         {
             cancellation.Cancel();
@@ -154,7 +156,25 @@ public sealed class ControlServer : IDisposable
         }, TaskScheduler.Default);
     }
 
-    public void Dispose() => Stop();
+    /// <summary>
+    /// Para como o <see cref="Stop"/> e ESPERA os fechamentos: roda na saída do app, e sem
+    /// esperar o processo terminaria antes de o 1000 ir para a rede (spec 01). Volta quando
+    /// cada app respondeu ao fechamento, ou em 2 s, o mesmo prazo que solta um app que não
+    /// responde. Bloquear a thread da interface aqui não trava nada: fechamentos, recepção e
+    /// prazo rodam todos no pool, e nenhum deles passa pelo contexto dela.
+    /// </summary>
+    public void Dispose()
+    {
+        Stop();
+        try
+        {
+            _closing?.Wait(CloseTimeout);
+        }
+        catch (Exception)
+        {
+            // Os fechamentos já engolem as falhas de cada conexão; nada aqui impede a saída.
+        }
+    }
 
     private void OnDeviceRemoved(string deviceId)
     {
