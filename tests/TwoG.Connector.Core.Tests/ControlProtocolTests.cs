@@ -39,6 +39,38 @@ public class ControlProtocolTests
         Assert.Equal(64, hello.DeviceName.Length);
     }
 
+    [Fact]
+    public void LongDeviceNameCutDoesNotSplitACharacter()
+    {
+        // Emoji fora do BMP (par de surrogates) nas posições 63/64: o corte cru deixaria só
+        // o surrogate alto, e o nome viraria UTF-16 inválido rumo ao arquivo e à UI.
+        var prefix = new string('x', 63);
+        var hello = Assert.IsType<HelloMessage>(Parse(
+            $$$"""{"type":"hello","protocol":1,"device":{"id":"a","name":"{{{prefix}}}🛩 do Galeno"}}"""));
+
+        Assert.True(hello.DeviceName.Length <= ControlProtocol.MaxDeviceNameLength);
+        Assert.False(char.IsHighSurrogate(hello.DeviceName[^1]));
+        AssertValidUtf16(hello.DeviceName);
+        Assert.Equal(prefix, hello.DeviceName);
+    }
+
+    [Fact]
+    public void LongDeviceNameCutKeepsACharacterThatFits()
+    {
+        var prefix = new string('x', 62);
+        var hello = Assert.IsType<HelloMessage>(Parse(
+            $$$"""{"type":"hello","protocol":1,"device":{"id":"a","name":"{{{prefix}}}🛩 do Galeno"}}"""));
+
+        Assert.Equal(prefix + "🛩", hello.DeviceName);
+        AssertValidUtf16(hello.DeviceName);
+    }
+
+    private static void AssertValidUtf16(string text)
+    {
+        var strict = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        strict.GetBytes(text);   // lança EncoderFallbackException se houver surrogate solto
+    }
+
     [Theory]
     [InlineData("""{"type":"hello","protocol":2}""", 2)]
     [InlineData("""{"type":"hello","protocol":2,"device":"iPad"}""", 2)]

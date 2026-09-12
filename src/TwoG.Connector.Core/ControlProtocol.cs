@@ -81,7 +81,13 @@ public static class ControlProtocol
         if (name.Length == 0)
             return null;
         if (name.Length > MaxDeviceNameLength)
+        {
+            // O corte conta unidades UTF-16: se partir um par de surrogates (emoji), descarta
+            // a metade alta que sobrou. Basta isso porque a entrada já é UTF-16 válido.
             name = name[..MaxDeviceNameLength];
+            if (char.IsHighSurrogate(name[^1]))
+                name = name[..^1];
+        }
 
         var token = TryString(root, "token", out var t) && t.Length > 0 ? t : null;
         return new HelloMessage(protocol, id, name, token);
