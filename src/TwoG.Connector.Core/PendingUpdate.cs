@@ -11,6 +11,7 @@ public static class PendingUpdateStore
 {
     public const string StateFileName = "pending.json";
 
+    /// <summary>Estado ausente, corrompido ou ilegível vira null. Não lança por I/O.</summary>
     public static PendingUpdate? Load(string updatesDir)
     {
         var path = Path.Combine(updatesDir, StateFileName);
@@ -27,6 +28,11 @@ public static class PendingUpdateStore
         }
     }
 
+    /// <summary>
+    /// Grava o estado. Ao contrário de Load, Clear e FileIsIntact, deixa escapar
+    /// IOException e UnauthorizedAccessException (somente leitura, ACL, disco cheio):
+    /// quem chama precisa saber que nada foi gravado.
+    /// </summary>
     public static void Save(string updatesDir, PendingUpdate pending)
     {
         Directory.CreateDirectory(updatesDir);
@@ -36,6 +42,11 @@ public static class PendingUpdateStore
         File.Move(tmp, path, overwrite: true);
     }
 
+    /// <summary>
+    /// Conta mais uma tentativa e grava, antes de instalar. Lança como <see cref="Save"/>;
+    /// se lançar, não instale: o limite de <see cref="UpdatePolicy.MaxAttempts"/> depende
+    /// deste contador, e sem ele uma instalação que falha se repetiria a cada partida.
+    /// </summary>
     public static PendingUpdate RecordAttempt(string updatesDir, PendingUpdate pending)
     {
         var next = pending with { Attempts = pending.Attempts + 1 };

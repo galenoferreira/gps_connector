@@ -55,6 +55,18 @@ public class PendingUpdateStoreTests
     }
 
     [Fact]
+    public void RecordAttemptThatCannotBeSavedThrows_SoTheCallerDoesNotInstall()
+    {
+        using var tmp = new TestTempDir();
+        var pending = WriteDownload(tmp);
+        // Um arquivo no lugar da pasta: a gravação falha em qualquer SO.
+        var updates = tmp.Sub("updates");
+        File.WriteAllText(updates, "");
+
+        Assert.ThrowsAny<IOException>(() => PendingUpdateStore.RecordAttempt(updates, pending));
+    }
+
+    [Fact]
     public void FileIsIntactDetectsLocalChanges()
     {
         using var tmp = new TestTempDir();
