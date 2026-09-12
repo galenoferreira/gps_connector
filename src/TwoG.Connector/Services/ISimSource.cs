@@ -45,6 +45,12 @@ public interface ISimSource : IDisposable
     /// </summary>
     IFlightPlanSource? FlightPlans { get; }
 
+    /// <summary>
+    /// Comando do simulador pelo 2G Pilot, quando a fonte souber fazer. Null quando não
+    /// suporta (X-Plane, até o spec 03).
+    /// </summary>
+    ISimControl? Control { get; }
+
     void Start();
     void Stop();
 }

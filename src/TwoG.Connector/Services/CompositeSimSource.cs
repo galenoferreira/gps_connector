@@ -13,8 +13,13 @@ namespace TwoG.Connector.Services;
 public sealed class CompositeSimSource : ISimSource
 {
     private readonly IReadOnlyList<ISimSource> _sources;
+    private readonly CompositeSimControl _control;
 
-    public CompositeSimSource(params ISimSource[] sources) => _sources = sources;
+    public CompositeSimSource(params ISimSource[] sources)
+    {
+        _sources = sources;
+        _control = new CompositeSimControl(() => Active, sources);
+    }
 
     /// <summary>
     /// Fonte mais "adiantada": prioriza quem está recebendo dados, depois quem
@@ -54,6 +59,9 @@ public sealed class CompositeSimSource : ISimSource
 
     /// <summary>Plano de voo vem sempre da fonte ativa — nunca de um simulador fechado.</summary>
     public IFlightPlanSource? FlightPlans => Active?.FlightPlans;
+
+    /// <summary>Sempre o mesmo objeto: o servidor do canal guarda esta referência.</summary>
+    public ISimControl? Control => _control;
 
     /// <summary>Soma de todas as fontes: na prática só uma delas está recebendo.</summary>
     public long NonFiniteSamples => _sources.Sum(s => s.NonFiniteSamples);

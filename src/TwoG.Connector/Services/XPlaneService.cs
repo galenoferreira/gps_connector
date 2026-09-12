@@ -62,6 +62,9 @@ public sealed class XPlaneService : ISimSource, IFlightPlanSource
 
     public string? LastError => _lastError;
 
+    /// <summary>Rádios no X-Plane chegam com o spec 03.</summary>
+    public ISimControl? Control => null;
+
     public void Start()
     {
         if (_thread is not null)

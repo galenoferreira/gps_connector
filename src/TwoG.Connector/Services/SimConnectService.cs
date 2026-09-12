@@ -33,7 +33,7 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
 
     private enum DEFINITION { Position }
     private enum REQUEST { Position, FlightPlan }
-    private enum EVENT_ID { Sim, PauseEx1, Crashed, CrashReset, FlightPlanActivated, FlightPlanDeactivated }
+    private enum EVENT_ID { Sim, PauseEx1, Crashed, CrashReset, FlightPlanActivated, FlightPlanDeactivated, AircraftLoaded }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct PositionStruct
@@ -66,6 +66,13 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
 
     private long _nonFiniteSamples;
 
+    private readonly SimConnectRadios _radios;
+
+    public SimConnectService()
+    {
+        _radios = new SimConnectRadios(() => _simulatorName);
+    }
+
     public string Name => "SimConnect";
 
     public SimConnectionState State
@@ -87,6 +94,8 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
     public string? SimulatorName => _simulatorName;
 
     public GpsFix? LatestFix => _latestFix;
+
+    public ISimControl? Control => _radios;
 
     public long NonFiniteSamples => Interlocked.Read(ref _nonFiniteSamples);
 
@@ -113,6 +122,7 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
     public void Dispose()
     {
         Stop();
+        _radios.Dispose();
         _simEvent.Dispose();
         _stopEvent.Dispose();
     }
@@ -121,7 +131,7 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
 
     private void ThreadMain()
     {
-        var waitConnected = new WaitHandle[] { _stopEvent, _simEvent };
+        var waitConnected = new WaitHandle[] { _stopEvent, _simEvent, _radios.CommandSignal };
         while (true)
         {
             if (_sim is null)
@@ -150,6 +160,17 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
                     TearDown();
                 }
             }
+            if (signaled == 2)
+            {
+                try
+                {
+                    _radios.Drain(_sim);
+                }
+                catch (COMException)
+                {
+                    TearDown();
+                }
+            }
         }
         TearDown();
     }
@@ -164,6 +185,8 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
             sim.OnRecvEvent += OnRecvEvent;
             sim.OnRecvSimobjectData += OnRecvSimobjectData;
             sim.OnRecvSystemState += OnRecvSystemState;
+            sim.OnRecvException += OnRecvException;
+            sim.OnRecvEventFilename += OnRecvEventFilename;
             _sim = sim;
             _lastError = null;
         }
@@ -197,6 +220,7 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
         _crashed = false;
         _simulatorName = null;
         _flightPlanPath = null;
+        _radios.Reset();
         _state = SimConnectionState.Searching;
     }
 
@@ -234,6 +258,10 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
         sender.SubscribeToSystemEvent(EVENT_ID.FlightPlanActivated, "FlightPlanActivated");
         sender.SubscribeToSystemEvent(EVENT_ID.FlightPlanDeactivated, "FlightPlanDeactivated");
         RequestFlightPlanPath(sender);
+
+        // Troca de aeronave refaz a lista de controles (spec 02, "Lista de controles por aeronave").
+        sender.SubscribeToSystemEvent(EVENT_ID.AircraftLoaded, "AircraftLoaded");
+        _radios.Register(sender);
     }
 
     private static void RequestFlightPlanPath(SimConnect sender)
@@ -259,6 +287,14 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
     }
 
     private void OnRecvQuit(SimConnect sender, SIMCONNECT_RECV data) => TearDown();
+
+    private void OnRecvException(SimConnect sender, SIMCONNECT_RECV_EXCEPTION data) => _radios.OnException(data);
+
+    private void OnRecvEventFilename(SimConnect sender, SIMCONNECT_RECV_EVENT_FILENAME data)
+    {
+        if ((EVENT_ID)data.uEventID == EVENT_ID.AircraftLoaded)
+            _radios.OnAircraftLoaded(sender);
+    }
 
     private void OnRecvEvent(SimConnect sender, SIMCONNECT_RECV_EVENT data)
     {
@@ -291,6 +327,8 @@ public sealed class SimConnectService : ISimSource, IFlightPlanSource
 
     private void OnRecvSimobjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA data)
     {
+        if (_radios.OnData(data))
+            return;
         if (data.dwRequestID != (uint)REQUEST.Position)
             return;
         if (!_simRunning || _paused || _crashed)
