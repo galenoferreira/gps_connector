@@ -80,7 +80,7 @@ X-Plane ──────────UDP RREF────┘
   binário atende MSFS 2020/2024, Prepar3D e X-Plane.
 - **Transmissão**: posição (`XGPS`) e atitude (`XATT`) por broadcast dirigido em
   todas as interfaces de rede ativas, mais unicast opcional para IPs específicos.
-  Padrão de 2 Hz, ajustável na interface.
+  Padrão de 3 Hz, ajustável na interface (0,5 a 10 Hz).
 - **Descoberta automática do EFB**: acha o app na rede e passa a mandar unicast
   direto para ele, *somando* ao broadcast. Ver [Descoberta automática](#descoberta-automática-do-efb).
 - **Pausa inteligente**: com o simulador pausado ou no menu, a transmissão para e
@@ -449,7 +449,8 @@ finais do `XATT` completam os 13 campos que alguns EFBs esperam; o ForeFlight
 ignora os extras.
 
 > A especificação da ForeFlight recomenda posição a 1 Hz e atitude a 4–10 Hz.
-> O padrão deste produto é 2 Hz para ambas, ajustável na interface.
+> O padrão deste produto é 3 Hz para ambas, ajustável na interface. Quem já tinha
+> outro valor gravado continua com ele até mudar nas Configurações.
 
 ---
 

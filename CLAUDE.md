@@ -32,7 +32,8 @@ Conector Windows (WPF, .NET 10, x64) que lê posição de simuladores via SimCon
   roll positivo = asa direita — a conversão de sinais do MSFS acontece SÓ no SimConnectService.
 - Build local em macOS/Linux exige `EnableWindowsTargeting` (já no csproj): `dotnet build` compila,
   mas só roda no Windows.
-- Taxas padrão: 2 Hz para XGPS e XATT (decisão do produto; configurável na UI).
+- Taxas padrão: 3 Hz para XGPS e XATT (decisão do produto; configurável na UI, 0,5 a 10 Hz).
+  Quem já tinha outro valor gravado em `settings.json` continua com ele.
 - Prepar3D usa a MESMA API SimConnect, mesmas SimVars e mesmas convenções de sinal
   invertidas do FSX — não há caminho de código separado, só o nome exibido muda
   (`SimulatorIdentity.Describe`). Suporte ainda NÃO validado num P3D real.

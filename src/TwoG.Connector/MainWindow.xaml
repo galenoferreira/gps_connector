@@ -7,7 +7,7 @@
         xmlns:vm="clr-namespace:TwoG.Connector.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
-        Title="2G Connector"
+        Title="{Binding WindowTitle, Mode=OneTime, FallbackValue='2G Connector'}"
         Width="470" SizeToContent="Height"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen"
@@ -60,8 +60,18 @@
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <StackPanel Grid.Column="1" Margin="13,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="2G Connector" FontSize="19" FontWeight="Bold"
-                               Foreground="{StaticResource TextBrush}" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="2G Connector" FontSize="19" FontWeight="Bold"
+                                   Foreground="{StaticResource TextBrush}" />
+                        <!-- Versão à vista, no cabeçalho: o rodapé é discreto demais para
+                             quem precisa dizer em que versão está. -->
+                        <Border Background="{StaticResource InputBrush}" BorderBrush="{StaticResource CardBorderBrush}"
+                                BorderThickness="1" CornerRadius="6"
+                                Padding="7,2" Margin="9,2,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding AppVersion, Mode=OneTime}" FontSize="11.5"
+                                       FontWeight="SemiBold" Foreground="{StaticResource DimBrush}" />
+                        </Border>
+                    </StackPanel>
                     <TextBlock Text="MSFS • Prepar3D • X-Plane" FontSize="12"
                                Foreground="{StaticResource DimBrush}" Margin="1,1,0,0" />
                 </StackPanel>

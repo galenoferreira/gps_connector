@@ -137,8 +137,14 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _settingsFeedback = "";
     [ObservableProperty] private Brush _settingsFeedbackBrush = Dim;
 
-    public string VersionText =>
-        $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0"}  •  © 2026 2G";
+    /// <summary>Versão do app, sem mais nada: vai no cabeçalho e no título da janela.</summary>
+    public string AppVersion =>
+        $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0"}";
+
+    /// <summary>Título da janela, com a versão — aparece também na barra de tarefas.</summary>
+    public string WindowTitle => $"2G Connector {AppVersion}";
+
+    public string VersionText => $"{AppVersion}  •  © 2026 2G";
 
     private void LoadSettingsIntoInputs()
     {

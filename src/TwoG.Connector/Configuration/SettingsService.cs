@@ -59,8 +59,8 @@ public sealed class SettingsService
         if (s.DeviceName.Length == 0) s.DeviceName = _defaultDeviceName;
         if (s.Port is < 1 or > 65535) s.Port = 49002;
         if (s.ControlPort is < 1 or > 65535) s.ControlPort = 49004;
-        if (s.XgpsHz is < 0.5 or > 10) s.XgpsHz = 2.0;
-        if (s.XattHz is < 1 or > 10) s.XattHz = 2.0;
+        if (s.XgpsHz is < 0.5 or > 10) s.XgpsHz = 3.0;
+        if (s.XattHz is < 1 or > 10) s.XattHz = 3.0;
         return s;
     }
 }
